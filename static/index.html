@@ -1,1 +1,49 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marins Fasad Control Center</title><link rel="stylesheet" href="/static/styles.css"></head><body><main><header><div><small>MARINS FASAD</small><h1>Control Center</h1></div><button id="newProject">Новый проект</button></header><section class="layout"><aside><h2>Проекты</h2><div id="projects"></div></aside><article><div id="empty">Создайте проект и загрузите исходник.</div><div id="workspace" hidden><div class="topline"><div><small>ПРОЕКТ</small><h2 id="projectName"></h2></div><span id="stageBadge"></span></div><div class="steps"><button data-step="geometry">01 Геометрия</button><button data-step="environment">02 Окружение</button><button data-step="final">03 Final</button><button data-step="branding">04 Вывеска</button></div><section id="sourcePanel" class="panel"><h3>Исходник</h3><input id="sourceFile" type="file" accept="image/*"><button id="uploadSource">Загрузить</button></section><section id="compare" class="compare"><div><label>ДО</label><img id="before"></div><div><label>ПОСЛЕ</label><img id="after"></div></section><section class="actions"><textarea id="comment" placeholder="Комментарий к корректировке"></textarea><div><button id="runGeometry">Исправить геометрию</button><button id="runEnvironment">Дорисовать окружение</button><button id="approve">Подтвердить</button><button id="revise" class="ghost">На доработку</button></div></section><section id="brandingPanel" class="panel"><h3>Параметры вывески</h3><div class="grid"><input id="bx" type="number" placeholder="X"><input id="by" type="number" placeholder="Y"><input id="bw" type="number" placeholder="Ширина"><input id="bh" type="number" placeholder="Высота"></div><textarea id="material" placeholder="Материал, подсветка, толщина букв, крепление"></textarea><input id="logo" type="file" accept=".svg,image/*"><button id="runBranding">Сгенерировать вывеску</button></section><section><h3>История</h3><pre id="history"></pre></section></div></article></section></main><script src="/static/app.js"></script></body></html>
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marins Fasad Control Center</title><link rel="stylesheet" href="/static/styles.css"></head><body><main><header><div><small>MARINS FASAD</small><h1>Control Center</h1></div><button id="newProject">Новый проект</button></header><section class="layout"><aside><h2>Проекты</h2><div id="projects"></div></aside><article><div id="empty">Создайте проект и загрузите исходник.</div><div id="workspace" hidden><div class="topline"><div><small>ПРОЕКТ</small><h2 id="projectName"></h2></div><span id="stageBadge"></span></div><div class="steps"><button data-step="geometry">01 Геометрия</button><button data-step="environment">02 Окружение</button><button data-step="final">03 Final</button><button data-step="branding">04 Вывеска</button></div><section id="sourcePanel" class="panel"><h3>Исходник</h3><input id="sourceFile" type="file" accept="image/*"><button id="uploadSource">Загрузить</button></section>
+<section id="perspectiveEditor" class="panel perspective-editor">
+  <div class="editor-header">
+    <div>
+      <h3>Ручное выравнивание перспективы</h3>
+      <p>
+        Постройте левую вертикаль, правую вертикаль и линию горизонта.
+        Для каждой направляющей укажите две точки.
+      </p>
+    </div>
+    <span id="guideStatus">0 из 3 направляющих</span>
+  </div>
+
+  <div class="guide-toolbar">
+    <button id="selectLeftGuide" type="button">
+      1. Левая вертикаль
+    </button>
+    <button id="selectRightGuide" type="button">
+      2. Правая вертикаль
+    </button>
+    <button id="selectHorizonGuide" type="button">
+      3. Горизонт
+    </button>
+    <button id="undoGuide" type="button" class="ghost">
+      Отменить точку
+    </button>
+    <button id="resetGuides" type="button" class="ghost">
+      Сбросить
+    </button>
+  </div>
+
+  <div id="canvasWrap" class="canvas-wrap">
+    <canvas id="perspectiveCanvas"></canvas>
+    <div id="canvasHint">
+      Сначала выберите «Левая вертикаль», затем поставьте две точки.
+    </div>
+  </div>
+
+  <div class="guide-legend">
+    <span><i class="guide-left"></i>Левая вертикаль</span>
+    <span><i class="guide-right"></i>Правая вертикаль</span>
+    <span><i class="guide-horizon"></i>Горизонт</span>
+  </div>
+
+  <button id="applyManualGeometry" type="button">
+    Применить ручное выравнивание
+  </button>
+</section>
+<section id="compare" class="compare"><div><label>ДО</label><img id="before"></div><div><label>ПОСЛЕ</label><img id="after"></div></section><section class="actions"><textarea id="comment" placeholder="Комментарий к корректировке"></textarea><div><button id="runGeometry">Исправить геометрию</button><button id="runEnvironment">Дорисовать окружение</button><button id="approve">Подтвердить</button><button id="revise" class="ghost">На доработку</button></div></section><section id="brandingPanel" class="panel"><h3>Параметры вывески</h3><div class="grid"><input id="bx" type="number" placeholder="X"><input id="by" type="number" placeholder="Y"><input id="bw" type="number" placeholder="Ширина"><input id="bh" type="number" placeholder="Высота"></div><textarea id="material" placeholder="Материал, подсветка, толщина букв, крепление"></textarea><input id="logo" type="file" accept=".svg,image/*"><button id="runBranding">Сгенерировать вывеску</button></section><section><h3>История</h3><pre id="history"></pre></section></div></article></section></main><script src="/static/app.js"></script></body></html>

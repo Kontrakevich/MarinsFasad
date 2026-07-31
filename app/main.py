@@ -223,6 +223,201 @@ def revise_stage(project_id: str, stage: str, comment: str) -> dict:
     return state
 
 
+
+def _line_angle_deg(line: list[dict]) -> float:
+    p1, p2 = line
+    return float(np.degrees(np.arctan2(
+        float(p2["y"]) - float(p1["y"]),
+        float(p2["x"]) - float(p1["x"]),
+    )))
+
+
+def _rotate_point(point: tuple[float, float], matrix: np.ndarray) -> tuple[float, float]:
+    x, y = point
+    return (
+        float(matrix[0, 0] * x + matrix[0, 1] * y + matrix[0, 2]),
+        float(matrix[1, 0] * x + matrix[1, 1] * y + matrix[1, 2]),
+    )
+
+
+def manual_perspective_correct(
+    src: Path,
+    dst: Path,
+    report_path: Path,
+    guides: dict,
+) -> dict:
+    image = cv2.imread(str(src))
+    if image is None:
+        raise HTTPException(400, "Unsupported image")
+
+    h, w = image.shape[:2]
+
+    for key in ("left_vertical", "right_vertical", "horizon"):
+        line = guides.get(key)
+        if not isinstance(line, list) or len(line) != 2:
+            raise HTTPException(400, f"Invalid guide: {key}")
+
+    horizon_angle = _line_angle_deg(guides["horizon"])
+    if abs(horizon_angle) > 30:
+        raise HTTPException(400, "Линия горизонта имеет слишком большой наклон")
+
+    center = (w / 2.0, h / 2.0)
+    rotation_matrix = cv2.getRotationMatrix2D(center, horizon_angle, 1.0)
+
+    cos = abs(rotation_matrix[0, 0])
+    sin = abs(rotation_matrix[0, 1])
+    rotated_w = int(h * sin + w * cos)
+    rotated_h = int(h * cos + w * sin)
+
+    rotation_matrix[0, 2] += rotated_w / 2.0 - center[0]
+    rotation_matrix[1, 2] += rotated_h / 2.0 - center[1]
+
+    rotated = cv2.warpAffine(
+        image,
+        rotation_matrix,
+        (rotated_w, rotated_h),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_REFLECT_101,
+    )
+
+    def rotated_line(name: str) -> list[tuple[float, float]]:
+        return [
+            _rotate_point(
+                (float(point["x"]), float(point["y"])),
+                rotation_matrix,
+            )
+            for point in guides[name]
+        ]
+
+    left = sorted(rotated_line("left_vertical"), key=lambda p: p[1])
+    right = sorted(rotated_line("right_vertical"), key=lambda p: p[1])
+
+    left_top, left_bottom = left
+    right_top, right_bottom = right
+
+    if left_top[0] >= right_top[0]:
+        raise HTTPException(400, "Левая вертикаль должна находиться левее правой")
+
+    top_width = np.linalg.norm(
+        np.array(right_top, dtype=np.float32)
+        - np.array(left_top, dtype=np.float32)
+    )
+    bottom_width = np.linalg.norm(
+        np.array(right_bottom, dtype=np.float32)
+        - np.array(left_bottom, dtype=np.float32)
+    )
+    left_height = np.linalg.norm(
+        np.array(left_bottom, dtype=np.float32)
+        - np.array(left_top, dtype=np.float32)
+    )
+    right_height = np.linalg.norm(
+        np.array(right_bottom, dtype=np.float32)
+        - np.array(right_top, dtype=np.float32)
+    )
+
+    target_width = int(max(top_width, bottom_width))
+    target_height = int(max(left_height, right_height))
+
+    if target_width < 200 or target_height < 150:
+        raise HTTPException(400, "Направляющие построены на слишком маленькой области")
+
+    source_quad = np.float32([
+        left_top,
+        right_top,
+        right_bottom,
+        left_bottom,
+    ])
+
+    target_quad = np.float32([
+        [0, 0],
+        [target_width - 1, 0],
+        [target_width - 1, target_height - 1],
+        [0, target_height - 1],
+    ])
+
+    perspective_matrix = cv2.getPerspectiveTransform(
+        source_quad,
+        target_quad,
+    )
+
+    corrected = cv2.warpPerspective(
+        rotated,
+        perspective_matrix,
+        (target_width, target_height),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_REFLECT_101,
+    )
+
+    cv2.imwrite(str(dst), corrected)
+
+    report = {
+        "mode": "manual_guides",
+        "horizon_rotation_deg": horizon_angle,
+        "source_size": {"width": w, "height": h},
+        "rotated_size": {"width": rotated_w, "height": rotated_h},
+        "output_size": {
+            "width": target_width,
+            "height": target_height,
+        },
+        "guides": guides,
+        "status": "manual_review_required",
+        "note": (
+            "Результат построен по двум пользовательским вертикалям "
+            "и линии горизонта."
+        ),
+    }
+
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        "utf-8",
+    )
+    return report
+
+
+@app.post("/api/projects/{project_id}/geometry/manual")
+def run_manual_geometry(
+    project_id: str,
+    guides_json: str = Form(...),
+) -> dict:
+    p = project_dir(project_id)
+    state = load_state(p)
+
+    source_rel = state["files"].get("source")
+    if not source_rel:
+        raise HTTPException(409, "Upload source first")
+
+    try:
+        guides = json.loads(guides_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, "Invalid guides JSON") from exc
+
+    src = p / source_rel
+    dst = p / "geometry" / "geometry_manual.jpg"
+    report_path = p / "geometry" / "geometry_manual.json"
+
+    report = manual_perspective_correct(
+        src,
+        dst,
+        report_path,
+        guides,
+    )
+
+    state["files"]["geometry"] = "geometry/geometry_manual.jpg"
+    state["files"]["geometry_report"] = "geometry/geometry_manual.json"
+    state["statuses"]["geometry"] = "review"
+    state["stage"] = "geometry_review"
+
+    state["comments"].append({
+        "stage": "geometry",
+        "type": "manual_guides",
+        "text": "Геометрия построена по пользовательским направляющим.",
+        "at": now(),
+    })
+
+    save_state(p, state)
+    log_event(p, "manual_geometry_generated", report)
+    return state
+
 @app.post("/api/projects/{project_id}/geometry/approve")
 def approve_geometry(project_id: str, comment: str = Form("")) -> dict:
     return approve_stage(project_id, "geometry", comment)
