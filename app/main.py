@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import urllib.request
+import urllib.error
+import mimetypes
+import base64
 import os
 import shutil
 import uuid
@@ -246,87 +250,70 @@ def manual_perspective_correct(
     report_path: Path,
     guides: dict,
 ) -> dict:
+    """
+    Выравнивает выбранную пользователем плоскость, но применяет
+    гомографию ко всему изображению. Исходный кадр не обрезается
+    по границам управляющей сетки.
+    """
     image = cv2.imread(str(src))
     if image is None:
         raise HTTPException(400, "Unsupported image")
 
-    h, w = image.shape[:2]
+    height, width = image.shape[:2]
+    quad = guides.get("quad")
 
-    for key in ("left_vertical", "right_vertical", "horizon"):
-        line = guides.get(key)
-        if not isinstance(line, list) or len(line) != 2:
-            raise HTTPException(400, f"Invalid guide: {key}")
+    if not isinstance(quad, list) or len(quad) != 4:
+        raise HTTPException(
+            400,
+            "Требуются четыре угловые точки сетки",
+        )
 
-    horizon_angle = _line_angle_deg(guides["horizon"])
-    if abs(horizon_angle) > 30:
-        raise HTTPException(400, "Линия горизонта имеет слишком большой наклон")
+    try:
+        points = np.float32([
+            [float(point["x"]), float(point["y"])]
+            for point in quad
+        ])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            400,
+            "Некорректные координаты сетки",
+        ) from exc
 
-    center = (w / 2.0, h / 2.0)
-    rotation_matrix = cv2.getRotationMatrix2D(center, horizon_angle, 1.0)
+    # Порядок точек:
+    # 0 — верхняя левая
+    # 1 — верхняя правая
+    # 2 — нижняя правая
+    # 3 — нижняя левая
+    contour = points.reshape((-1, 1, 2))
 
-    cos = abs(rotation_matrix[0, 0])
-    sin = abs(rotation_matrix[0, 1])
-    rotated_w = int(h * sin + w * cos)
-    rotated_h = int(h * cos + w * sin)
+    if not cv2.isContourConvex(contour):
+        raise HTTPException(
+            400,
+            "Линии сетки не должны пересекаться",
+        )
 
-    rotation_matrix[0, 2] += rotated_w / 2.0 - center[0]
-    rotation_matrix[1, 2] += rotated_h / 2.0 - center[1]
+    area = abs(float(cv2.contourArea(contour)))
+    if area < width * height * 0.02:
+        raise HTTPException(
+            400,
+            "Область сетки слишком мала",
+        )
 
-    rotated = cv2.warpAffine(
-        image,
-        rotation_matrix,
-        (rotated_w, rotated_h),
-        flags=cv2.INTER_CUBIC,
-        borderMode=cv2.BORDER_REFLECT_101,
+    tl, tr, br, bl = points
+
+    top_width = float(np.linalg.norm(tr - tl))
+    bottom_width = float(np.linalg.norm(br - bl))
+    left_height = float(np.linalg.norm(bl - tl))
+    right_height = float(np.linalg.norm(br - tr))
+
+    target_width = max(
+        320,
+        int(round(max(top_width, bottom_width))),
     )
-
-    def rotated_line(name: str) -> list[tuple[float, float]]:
-        return [
-            _rotate_point(
-                (float(point["x"]), float(point["y"])),
-                rotation_matrix,
-            )
-            for point in guides[name]
-        ]
-
-    left = sorted(rotated_line("left_vertical"), key=lambda p: p[1])
-    right = sorted(rotated_line("right_vertical"), key=lambda p: p[1])
-
-    left_top, left_bottom = left
-    right_top, right_bottom = right
-
-    if left_top[0] >= right_top[0]:
-        raise HTTPException(400, "Левая вертикаль должна находиться левее правой")
-
-    top_width = np.linalg.norm(
-        np.array(right_top, dtype=np.float32)
-        - np.array(left_top, dtype=np.float32)
+    target_height = max(
+        240,
+        int(round(max(left_height, right_height))),
     )
-    bottom_width = np.linalg.norm(
-        np.array(right_bottom, dtype=np.float32)
-        - np.array(left_bottom, dtype=np.float32)
-    )
-    left_height = np.linalg.norm(
-        np.array(left_bottom, dtype=np.float32)
-        - np.array(left_top, dtype=np.float32)
-    )
-    right_height = np.linalg.norm(
-        np.array(right_bottom, dtype=np.float32)
-        - np.array(right_top, dtype=np.float32)
-    )
-
-    target_width = int(max(top_width, bottom_width))
-    target_height = int(max(left_height, right_height))
-
-    if target_width < 200 or target_height < 150:
-        raise HTTPException(400, "Направляющие построены на слишком маленькой области")
-
-    source_quad = np.float32([
-        left_top,
-        right_top,
-        right_bottom,
-        left_bottom,
-    ])
 
     target_quad = np.float32([
         [0, 0],
@@ -335,35 +322,117 @@ def manual_perspective_correct(
         [0, target_height - 1],
     ])
 
-    perspective_matrix = cv2.getPerspectiveTransform(
-        source_quad,
+    # Преобразование выбранной плоскости в прямоугольник.
+    plane_matrix = cv2.getPerspectiveTransform(
+        points,
         target_quad,
     )
 
+    # Применяем ту же матрицу ко всем углам полного исходника.
+    full_image_corners = np.float32([[
+        [0, 0],
+        [width - 1, 0],
+        [width - 1, height - 1],
+        [0, height - 1],
+    ]])
+
+    transformed_corners = cv2.perspectiveTransform(
+        full_image_corners,
+        plane_matrix,
+    )[0]
+
+    min_x = float(np.floor(transformed_corners[:, 0].min()))
+    min_y = float(np.floor(transformed_corners[:, 1].min()))
+    max_x = float(np.ceil(transformed_corners[:, 0].max()))
+    max_y = float(np.ceil(transformed_corners[:, 1].max()))
+
+    output_width = max(1, int(max_x - min_x))
+    output_height = max(1, int(max_y - min_y))
+
+    translation = np.array([
+        [1.0, 0.0, -min_x],
+        [0.0, 1.0, -min_y],
+        [0.0, 0.0, 1.0],
+    ], dtype=np.float64)
+
+    full_matrix = translation @ plane_matrix
+
+    # Защита от слишком большого результата.
+    max_dimension = 8192
+    max_pixels = 50_000_000
+
+    dimension_scale = min(
+        1.0,
+        max_dimension / max(output_width, output_height),
+    )
+
+    pixel_scale = min(
+        1.0,
+        (
+            max_pixels /
+            max(1, output_width * output_height)
+        ) ** 0.5,
+    )
+
+    output_scale = min(dimension_scale, pixel_scale)
+
+    if output_scale < 1.0:
+        scale_matrix = np.array([
+            [output_scale, 0.0, 0.0],
+            [0.0, output_scale, 0.0],
+            [0.0, 0.0, 1.0],
+        ], dtype=np.float64)
+
+        full_matrix = scale_matrix @ full_matrix
+        output_width = max(
+            1,
+            int(round(output_width * output_scale)),
+        )
+        output_height = max(
+            1,
+            int(round(output_height * output_scale)),
+        )
+
     corrected = cv2.warpPerspective(
-        rotated,
-        perspective_matrix,
-        (target_width, target_height),
-        flags=cv2.INTER_CUBIC,
+        image,
+        full_matrix,
+        (output_width, output_height),
+        flags=cv2.INTER_LANCZOS4,
         borderMode=cv2.BORDER_REFLECT_101,
     )
 
-    cv2.imwrite(str(dst), corrected)
+    if not cv2.imwrite(
+        str(dst),
+        corrected,
+        [cv2.IMWRITE_JPEG_QUALITY, 95],
+    ):
+        raise HTTPException(
+            500,
+            "Не удалось сохранить результат",
+        )
 
     report = {
-        "mode": "manual_guides",
-        "horizon_rotation_deg": horizon_angle,
-        "source_size": {"width": w, "height": h},
-        "rotated_size": {"width": rotated_w, "height": rotated_h},
+        "mode": "full_frame_perspective_grid",
+        "crop_applied": False,
+        "source_size": {
+            "width": width,
+            "height": height,
+        },
         "output_size": {
+            "width": output_width,
+            "height": output_height,
+        },
+        "plane_target_size": {
             "width": target_width,
             "height": target_height,
         },
-        "guides": guides,
+        "quad": quad,
+        "matrix": full_matrix.tolist(),
         "status": "manual_review_required",
         "note": (
-            "Результат построен по двум пользовательским вертикалям "
-            "и линии горизонта."
+            "Выбранная плоскость выровнена, при этом гомография "
+            "применена ко всему исходному изображению без кропа "
+            "по управляющему четырёхугольнику."
         ),
     }
 
@@ -372,7 +441,6 @@ def manual_perspective_correct(
         "utf-8",
     )
     return report
-
 
 @app.post("/api/projects/{project_id}/geometry/manual")
 def run_manual_geometry(
@@ -404,6 +472,8 @@ def run_manual_geometry(
 
     state["files"]["geometry"] = "geometry/geometry_manual.jpg"
     state["files"]["geometry_report"] = "geometry/geometry_manual.json"
+    state["geometry_grid"] = guides.get("quad", [])
+    state["geometry_mode"] = "manual_grid"
     state["statuses"]["geometry"] = "review"
     state["stage"] = "geometry_review"
 
@@ -504,3 +574,316 @@ def get_file(project_id: str, file_key: str):
     if p.resolve() not in target.parents:
         raise HTTPException(400, "Invalid path")
     return FileResponse(target)
+
+
+def compile_stage_system_prompt(
+    project_path: Path,
+    stage: str,
+) -> str:
+    allowed_stages = {
+        "geometry",
+        "environment",
+        "branding",
+    }
+
+    if stage not in allowed_stages:
+        raise HTTPException(400, "Unsupported AI stage")
+
+    skill_text = ensure_skill(
+        project_path,
+        stage,
+    ).read_text("utf-8")
+
+    stage_rules = {
+        "geometry": """
+TASK: residual architectural geometry correction.
+
+The supplied image may already contain an approved manual
+perspective transformation.
+
+Treat the supplied image as the immutable geometric source of truth.
+
+Do not return to the original camera perspective.
+Do not undo the manual projective transformation.
+Do not crop the image.
+Do not change framing, field of view or camera position.
+Do not remove any part of the building.
+Do not redesign the facade.
+Do not move windows, doors, columns, slabs or roof elements.
+
+Correct only residual optical distortions that prevent architectural
+verticals from being parallel and the selected horizon from being
+level.
+""",
+        "environment": """
+TASK: environment cleanup and extension.
+
+Preserve the approved building geometry, camera position, framing,
+facade proportions and all architectural elements exactly.
+
+Remove only temporary visual obstructions explicitly allowed by the
+Skill: wires, poles, temporary vehicles, visual rubbish and other
+listed objects.
+
+Extend missing surroundings naturally without modifying the building.
+Do not crop or reframe the approved geometry.
+""",
+        "branding": """
+TASK: architectural signage integration.
+
+Preserve the approved final image, architecture, perspective,
+materials, lighting and framing.
+
+Add only the requested logo or signage in the specified placement
+zone, using the material, thickness, mounting and illumination
+parameters recorded in the Skill and operator request.
+""",
+    }
+
+    return f"""SYSTEM ROLE
+You are the image execution model of Marins Fasad Control Center.
+
+The current approved Skill is the primary instruction source.
+Operator comments may refine the task but may not cancel locked
+constraints from previous approved stages.
+
+CURRENT STAGE
+{stage}
+
+STAGE-SPECIFIC RULES
+{stage_rules[stage].strip()}
+
+CURRENT SKILL
+----------------
+{skill_text.strip()}
+----------------
+
+OUTPUT REQUIREMENTS
+Return one edited image.
+Preserve maximum photorealism and source resolution.
+Do not add captions, explanatory text, watermarks or UI elements.
+"""
+
+
+@app.get("/api/projects/{project_id}/prompt/{stage}")
+def get_stage_system_prompt(
+    project_id: str,
+    stage: str,
+) -> dict:
+    p = project_dir(project_id)
+
+    return {
+        "stage": stage,
+        "model": os.getenv(
+            "OPENROUTER_IMAGE_MODEL",
+            "google/gemini-2.5-flash-image",
+        ),
+        "prompt": compile_stage_system_prompt(p, stage),
+    }
+
+
+def image_as_data_url(image_path: Path) -> str:
+    mime_type = (
+        mimetypes.guess_type(image_path.name)[0]
+        or "image/jpeg"
+    )
+
+    encoded = base64.b64encode(
+        image_path.read_bytes()
+    ).decode("ascii")
+
+    return f"data:{mime_type};base64,{encoded}"
+
+
+@app.post("/api/projects/{project_id}/ai/{stage}")
+def run_ai_stage(
+    project_id: str,
+    stage: str,
+    operator_comment: str = Form(""),
+) -> dict:
+    p = project_dir(project_id)
+    state = load_state(p)
+
+    if stage == "geometry":
+        # Критически важно:
+        # ручной результат имеет приоритет над исходником.
+        source_rel = (
+            state["files"].get("geometry")
+            or state["files"].get("source")
+        )
+        output_rel = "geometry/geometry_ai.jpg"
+
+    elif stage == "environment":
+        source_rel = state["files"].get("geometry")
+        output_rel = "environment/environment_ai.jpg"
+
+    elif stage == "branding":
+        source_rel = (
+            state["files"].get("final")
+            or state["files"].get("environment")
+        )
+        output_rel = "branding/branding_ai.jpg"
+
+    else:
+        raise HTTPException(400, "Unsupported AI stage")
+
+    if not source_rel:
+        raise HTTPException(
+            409,
+            "Не найден утверждённый входной файл этапа",
+        )
+
+    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(
+            409,
+            "OPENROUTER_API_KEY не задан в Codespaces secrets",
+        )
+
+    model = os.getenv(
+        "OPENROUTER_IMAGE_MODEL",
+        "google/gemini-2.5-flash-image",
+    ).strip()
+
+    source_path = p / source_rel
+    output_path = p / output_rel
+
+    system_prompt = compile_stage_system_prompt(
+        p,
+        stage,
+    )
+
+    final_prompt = system_prompt
+
+    if operator_comment.strip():
+        final_prompt += (
+            "\n\nOPERATOR REQUEST\n"
+            + operator_comment.strip()
+        )
+
+    prompt_path = p / stage / "system_prompt.txt"
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(final_prompt, "utf-8")
+
+    payload = {
+        "model": model,
+        "prompt": final_prompt,
+        "n": 1,
+        "quality": "high",
+        "output_format": "jpeg",
+        "input_references": [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": image_as_data_url(source_path),
+                },
+            },
+        ],
+    }
+
+    request = urllib.request.Request(
+        "https://openrouter.ai/api/v1/images",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/Kontrakevich/MarinsFasad",
+            "X-Title": "Marins Fasad Control Center",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=300,
+        ) as response:
+            result = json.loads(
+                response.read().decode("utf-8")
+            )
+
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode(
+            "utf-8",
+            errors="replace",
+        )
+
+        raise HTTPException(
+            exc.code,
+            f"OpenRouter: {error_body[:2000]}",
+        ) from exc
+
+    except urllib.error.URLError as exc:
+        raise HTTPException(
+            502,
+            f"OpenRouter connection error: {exc}",
+        ) from exc
+
+    image_items = result.get("data") or []
+
+    if not image_items:
+        raise HTTPException(
+            502,
+            "OpenRouter не вернул изображение",
+        )
+
+    image_base64 = image_items[0].get("b64_json")
+    if not image_base64:
+        raise HTTPException(
+            502,
+            "В ответе OpenRouter отсутствует b64_json",
+        )
+
+    try:
+        output_path.write_bytes(
+            base64.b64decode(image_base64)
+        )
+    except Exception as exc:
+        raise HTTPException(
+            502,
+            "Не удалось декодировать изображение OpenRouter",
+        ) from exc
+
+    state["files"][f"{stage}_system_prompt"] = str(
+        prompt_path.relative_to(p)
+    ).replace("\\", "/")
+
+    if stage == "geometry":
+        state["files"]["geometry"] = output_rel
+        state["statuses"]["geometry"] = "review"
+        state["stage"] = "geometry_review"
+
+    elif stage == "environment":
+        state["files"]["environment"] = output_rel
+        state["statuses"]["environment"] = "review"
+        state["stage"] = "environment_review"
+
+    elif stage == "branding":
+        state["files"]["branding"] = output_rel
+        state["statuses"]["branding"] = "review"
+        state["stage"] = "branding_review"
+
+    state["comments"].append({
+        "stage": stage,
+        "type": "ai_generation",
+        "text": operator_comment.strip(),
+        "model": model,
+        "input_file": source_rel,
+        "output_file": output_rel,
+        "at": now(),
+    })
+
+    save_state(p, state)
+
+    log_event(
+        p,
+        f"{stage}_ai_generated",
+        {
+            "model": model,
+            "input_file": source_rel,
+            "output_file": output_rel,
+            "usage": result.get("usage"),
+        },
+    )
+
+    return state

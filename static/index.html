@@ -1,49 +1,241 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marins Fasad Control Center</title><link rel="stylesheet" href="/static/styles.css?v=20260731-2"></head><body><main><header><div><small>MARINS FASAD</small><h1>Control Center</h1></div><button id="newProject">Новый проект</button></header><section class="layout"><aside><h2>Проекты</h2><div id="projects"></div></aside><article><div id="empty">Создайте проект и загрузите исходник.</div><div id="workspace" hidden><div class="topline"><div><small>ПРОЕКТ</small><h2 id="projectName"></h2></div><span id="stageBadge"></span></div><div class="steps"><button data-step="geometry">01 Геометрия</button><button data-step="environment">02 Окружение</button><button data-step="final">03 Final</button><button data-step="branding">04 Вывеска</button></div><section id="sourcePanel" class="panel"><h3>Исходник</h3><input id="sourceFile" type="file" accept="image/*"><button id="uploadSource">Загрузить</button></section>
-<section id="perspectiveEditor" class="panel perspective-editor">
-  <div class="editor-header">
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  >
+  <title>Marins Fasad Control Center</title>
+  <link
+    rel="stylesheet"
+    href="/static/styles.css?v=0.7.0"
+  >
+</head>
+<body>
+<main>
+  <header>
     <div>
-      <h3>Ручное выравнивание перспективы</h3>
-      <p>
-        Постройте левую вертикаль, правую вертикаль и линию горизонта.
-        Для каждой направляющей укажите две точки.
-      </p>
+      <small>MARINS FASAD</small>
+      <h1>Control Center</h1>
     </div>
-    <span id="guideStatus">0 из 3 направляющих</span>
-  </div>
+    <button id="newProject">Новый проект</button>
+  </header>
 
-  <div class="guide-toolbar">
-    <button id="selectLeftGuide" type="button">
-      1. Левая вертикаль
-    </button>
-    <button id="selectRightGuide" type="button">
-      2. Правая вертикаль
-    </button>
-    <button id="selectHorizonGuide" type="button">
-      3. Горизонт
-    </button>
-    <button id="undoGuide" type="button" class="ghost">
-      Отменить точку
-    </button>
-    <button id="resetGuides" type="button" class="ghost">
-      Сбросить
-    </button>
-  </div>
+  <section class="layout">
+    <aside>
+      <h2>Проекты</h2>
+      <div id="projects"></div>
+    </aside>
 
-  <div id="canvasWrap" class="canvas-wrap">
-    <canvas id="perspectiveCanvas"></canvas>
-    <div id="canvasHint">
-      Сначала выберите «Левая вертикаль», затем поставьте две точки.
-    </div>
-  </div>
+    <article>
+      <div id="empty">
+        Создайте проект и загрузите исходник.
+      </div>
 
-  <div class="guide-legend">
-    <span><i class="guide-left"></i>Левая вертикаль</span>
-    <span><i class="guide-right"></i>Правая вертикаль</span>
-    <span><i class="guide-horizon"></i>Горизонт</span>
-  </div>
+      <div id="workspace" hidden>
+        <div class="topline">
+          <div>
+            <small>ПРОЕКТ</small>
+            <h2 id="projectName"></h2>
+          </div>
+          <span id="stageBadge"></span>
+        </div>
 
-  <button id="applyManualGeometry" type="button">
-    Применить ручное выравнивание
-  </button>
-</section>
-<section id="compare" class="compare"><div><label>ДО</label><img id="before"></div><div><label>ПОСЛЕ</label><img id="after"></div></section><section class="actions"><textarea id="comment" placeholder="Комментарий к корректировке"></textarea><div><button id="runGeometry">Исправить геометрию</button><button id="runEnvironment">Дорисовать окружение</button><button id="approve">Подтвердить</button><button id="revise" class="ghost">На доработку</button></div></section><section id="brandingPanel" class="panel"><h3>Параметры вывески</h3><div class="grid"><input id="bx" type="number" placeholder="X"><input id="by" type="number" placeholder="Y"><input id="bw" type="number" placeholder="Ширина"><input id="bh" type="number" placeholder="Высота"></div><textarea id="material" placeholder="Материал, подсветка, толщина букв, крепление"></textarea><input id="logo" type="file" accept=".svg,image/*"><button id="runBranding">Сгенерировать вывеску</button></section><section><h3>История</h3><pre id="history"></pre></section></div></article></section></main><script src="/static/app.js?v=20260731-2"></script></body></html>
+        <div class="steps">
+          <button>01 Геометрия</button>
+          <button>02 Окружение</button>
+          <button>03 Final</button>
+          <button>04 Вывеска</button>
+        </div>
+
+        <section class="panel">
+          <h3>Исходник</h3>
+          <input
+            id="sourceFile"
+            type="file"
+            accept="image/*"
+          >
+          <button id="uploadSource">
+            Загрузить
+          </button>
+        </section>
+
+        <section
+          id="perspectiveEditor"
+          class="panel"
+        >
+          <div class="section-heading">
+            <div>
+              <h3>Сетка перспективной трансформации</h3>
+              <p>
+                Совместите углы сетки с плоскостью фасада.
+                Перемещайте четыре круглых маркера.
+              </p>
+            </div>
+
+            <div class="editor-buttons">
+              <button
+                id="resetPerspectiveGrid"
+                class="ghost"
+              >
+                Сбросить сетку
+              </button>
+
+              <button id="applyPerspectiveGrid">
+                Применить трансформацию
+              </button>
+            </div>
+          </div>
+
+          <div
+            id="canvasWrap"
+            class="canvas-wrap"
+          >
+            <canvas id="perspectiveCanvas"></canvas>
+
+            <div id="canvasHint">
+              Перетаскивайте угловые точки сетки.
+              Полный кадр не будет обрезан.
+            </div>
+          </div>
+
+          <div class="grid-point-labels">
+            <span>1 — верхний левый</span>
+            <span>2 — верхний правый</span>
+            <span>3 — нижний правый</span>
+            <span>4 — нижний левый</span>
+          </div>
+        </section>
+
+        <section
+          id="compare"
+          class="compare"
+        >
+          <div>
+            <label>ДО</label>
+            <img id="before" alt="Исходное изображение">
+          </div>
+
+          <div>
+            <label>ПОСЛЕ</label>
+            <img id="after" alt="Результат обработки">
+          </div>
+        </section>
+
+        <section class="panel ai-panel">
+          <div class="section-heading">
+            <div>
+              <h3>Системный prompt нейронной модели</h3>
+              <p>
+                Prompt автоматически собирается из текущей
+                рабочей версии Skill.
+              </p>
+            </div>
+
+            <select id="aiStage">
+              <option value="geometry">
+                Геометрия
+              </option>
+              <option value="environment">
+                Окружение
+              </option>
+              <option value="branding">
+                Вывеска
+              </option>
+            </select>
+          </div>
+
+          <div class="model-row">
+            <span>Модель:</span>
+            <strong id="aiModel">—</strong>
+          </div>
+
+          <textarea
+            id="systemPrompt"
+            readonly
+            placeholder="Системный prompt будет загружен после выбора проекта"
+          ></textarea>
+
+          <textarea
+            id="aiComment"
+            placeholder="Дополнительная инструкция оператору нейронной модели"
+          ></textarea>
+
+          <div class="ai-actions">
+            <button
+              id="refreshPrompt"
+              class="ghost"
+            >
+              Обновить prompt из Skill
+            </button>
+
+            <button id="runAiStage">
+              Запустить Nano Banana
+            </button>
+          </div>
+
+          <div id="aiStatus"></div>
+        </section>
+
+        <section class="actions">
+          <textarea
+            id="comment"
+            placeholder="Комментарий к текущему результату"
+          ></textarea>
+
+          <div>
+            <button id="approve">
+              Подтвердить результат
+            </button>
+
+            <button
+              id="revise"
+              class="ghost"
+            >
+              На доработку
+            </button>
+          </div>
+        </section>
+
+        <section
+          id="brandingPanel"
+          class="panel"
+        >
+          <h3>Параметры зоны вывески</h3>
+
+          <div class="grid">
+            <input id="bx" type="number" placeholder="X">
+            <input id="by" type="number" placeholder="Y">
+            <input id="bw" type="number" placeholder="Ширина">
+            <input id="bh" type="number" placeholder="Высота">
+          </div>
+
+          <textarea
+            id="material"
+            placeholder="Материал, подсветка, толщина букв, крепление"
+          ></textarea>
+
+          <input
+            id="logo"
+            type="file"
+            accept=".svg,image/*"
+          >
+
+          <button id="runBrandingZone">
+            Зафиксировать зону вывески
+          </button>
+        </section>
+
+        <section>
+          <h3>История</h3>
+          <pre id="history"></pre>
+        </section>
+      </div>
+    </article>
+  </section>
+</main>
+
+<script src="/static/app.js?v=0.7.0"></script>
+</body>
+</html>
