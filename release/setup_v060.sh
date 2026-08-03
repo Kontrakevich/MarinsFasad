@@ -124,6 +124,7 @@ python "$ROOT/release/patch_v065.py" "$RUNTIME"
 python "$ROOT/release/patch_v066.py" "$RUNTIME"
 python "$ROOT/release/patch_v066_test_hotfix.py" "$RUNTIME"
 python "$ROOT/release/patch_v067.py" "$RUNTIME"
+python "$ROOT/release/patch_v068.py" "$RUNTIME"
 
 python -m pip install --upgrade pip
 python -m pip install -r "$RUNTIME/requirements.txt"
@@ -134,4 +135,4 @@ rm -rf "$RUNTIME/.test-data"
 MARINS_DATA_ROOT="$RUNTIME/.test-data/projects" pytest -q
 rm -rf "$RUNTIME/.test-data"
 
-echo "Marins Facade v0.6.7 installed in $RUNTIME"
+echo "Marins Facade v0.6.8 installed in $RUNTIME"
