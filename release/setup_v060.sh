@@ -6,6 +6,7 @@ PARTS_DIR="$ROOT/release/v060_xz"
 RUNTIME_ROOT="$ROOT/.runtime"
 RUNTIME="$RUNTIME_ROOT/MarinsFacade_v0.6.0"
 ARCHIVE="$RUNTIME_ROOT/MarinsFacade_v0.6.0.tar.xz"
+PROJECTS_BACKUP="$RUNTIME_ROOT/.projects_backup"
 EXPECTED_SHA256="12a3ecb31f96dcd76ec6de9fc79ba7c56b1fae2d3f8e91825c60a095a534898a"
 
 if [ ! -d "$PARTS_DIR" ]; then
@@ -30,8 +31,20 @@ if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
   exit 1
 fi
 
+rm -rf "$PROJECTS_BACKUP"
+if [ -d "$RUNTIME/data/projects" ]; then
+  mkdir -p "$PROJECTS_BACKUP"
+  cp -a "$RUNTIME/data/projects/." "$PROJECTS_BACKUP/"
+fi
+
 rm -rf "$RUNTIME"
 tar -xJf "$ARCHIVE" -C "$RUNTIME_ROOT"
+
+if [ -d "$PROJECTS_BACKUP" ]; then
+  mkdir -p "$RUNTIME/data/projects"
+  cp -a "$PROJECTS_BACKUP/." "$RUNTIME/data/projects/"
+  rm -rf "$PROJECTS_BACKUP"
+fi
 
 python - "$RUNTIME/app/web/app.js" <<'PY'
 from pathlib import Path
