@@ -66,6 +66,8 @@ path.write_text(text, "utf-8")
 print("Applied source-upload geometry refresh patch")
 PY
 
+python "$ROOT/release/patch_v061.py" "$RUNTIME"
+
 python -m pip install --upgrade pip
 python -m pip install -r "$RUNTIME/requirements.txt"
 
@@ -73,4 +75,4 @@ cd "$RUNTIME"
 python -m compileall app
 pytest -q
 
-echo "Marins Facade v0.6.0 installed in $RUNTIME"
+echo "Marins Facade v0.6.1 installed in $RUNTIME"
