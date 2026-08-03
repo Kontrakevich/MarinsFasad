@@ -33,6 +33,39 @@ fi
 rm -rf "$RUNTIME"
 tar -xJf "$ARCHIVE" -C "$RUNTIME_ROOT"
 
+python - "$RUNTIME/app/web/app.js" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text("utf-8")
+
+old_upload = "$('upload-source').onclick=async()=>{const file=$('source-file').files[0];if(!current||!file)return alert('Создайте проект и выберите изображение');await busy($('upload-source'),'Загрузка исходника',()=>api(`/api/projects/${current.id}/source`,{method:'POST',body:formData({file})}));await reload()}"
+new_upload = "$('upload-source').onclick=async()=>{const file=$('source-file').files[0];if(!current||!file)return alert('Создайте проект и выберите изображение');await busy($('upload-source'),'Загрузка исходника',()=>api(`/api/projects/${current.id}/source`,{method:'POST',body:formData({file})}));geo.image=null;geo.projectId=null;geo.sourcePath=null;await reload()}"
+
+old_geo = "const geo={image:null,corners:[],drag:-1,history:[],future:[],projectId:null};"
+new_geo = "const geo={image:null,corners:[],drag:-1,history:[],future:[],projectId:null,sourcePath:null};"
+
+old_loader = "function loadGeometryImage(){if(geo.projectId===current.id&&geo.image){drawGeometry();return}const img=new Image();img.onload=()=>{geo.image=img;geo.projectId=current.id;"
+new_loader = "function loadGeometryImage(){if(geo.projectId===current.id&&geo.sourcePath===current.active_files.source&&geo.image){drawGeometry();return}const img=new Image();img.onload=()=>{geo.image=img;geo.projectId=current.id;geo.sourcePath=current.active_files.source;"
+
+replacements = [
+    (old_upload, new_upload, "upload handler"),
+    (old_geo, new_geo, "geometry cache state"),
+    (old_loader, new_loader, "geometry image loader"),
+]
+
+for old, new, label in replacements:
+    if new in text:
+        continue
+    if old not in text:
+        raise SystemExit(f"Runtime UI patch failed: {label} pattern not found")
+    text = text.replace(old, new, 1)
+
+path.write_text(text, "utf-8")
+print("Applied source-upload geometry refresh patch")
+PY
+
 python -m pip install --upgrade pip
 python -m pip install -r "$RUNTIME/requirements.txt"
 
