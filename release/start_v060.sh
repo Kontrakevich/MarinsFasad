@@ -15,7 +15,7 @@ nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8070 > /tmp/marins-fa
 
 for attempt in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8070/api/health >/tmp/marins-facade-v060-health.json 2>/dev/null; then
-    echo "Marins Facade v0.6.7 started on port 8070"
+    echo "Marins Facade v0.6.8 started on port 8070"
     cat /tmp/marins-facade-v060-health.json
     exit 0
   fi
