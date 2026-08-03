@@ -1,16 +1,16 @@
 {
-  "name": "Marins Fasad Control Center",
-  "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
+  "name": "Marins Facade v0.6.0",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
   "forwardPorts": [8070],
   "portsAttributes": {
     "8070": {
-      "label": "Marins Fasad Control Center",
+      "label": "Marins Facade Control Center v0.6.0",
       "onAutoForward": "openBrowser",
       "visibility": "private"
     }
   },
-  "postCreateCommand": "python -m pip install --upgrade pip && pip install -r requirements.txt",
-  "postStartCommand": "bash .devcontainer/start.sh",
+  "postCreateCommand": "bash release/setup_v060.sh",
+  "postStartCommand": "bash release/start_v060.sh",
   "customizations": {
     "vscode": {
       "extensions": [
