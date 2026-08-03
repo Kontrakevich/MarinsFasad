@@ -7,6 +7,7 @@ RUNTIME_ROOT="$ROOT/.runtime"
 RUNTIME="$RUNTIME_ROOT/MarinsFacade_v0.6.0"
 ARCHIVE="$RUNTIME_ROOT/MarinsFacade_v0.6.0.tar.xz"
 PROJECTS_BACKUP="$RUNTIME_ROOT/.projects_backup"
+NAMED_USER_BACKUP="$RUNTIME_ROOT/.named_user_projects_backup"
 EXPECTED_SHA256="12a3ecb31f96dcd76ec6de9fc79ba7c56b1fae2d3f8e91825c60a095a534898a"
 
 if [ ! -d "$PARTS_DIR" ]; then
@@ -80,7 +81,42 @@ print("Applied source-upload geometry refresh patch")
 PY
 
 python "$ROOT/release/patch_v061.py" "$RUNTIME"
+
+rm -rf "$NAMED_USER_BACKUP"
+python - "$RUNTIME" "$NAMED_USER_BACKUP" <<'PY'
+import json
+import shutil
+import sys
+from pathlib import Path
+
+runtime = Path(sys.argv[1])
+backup = Path(sys.argv[2])
+names = {"Test facade", "Revision test", "No mirror fill"}
+projects = runtime / "data/projects"
+for folder in projects.iterdir() if projects.exists() else []:
+    state_file = folder / "project.json"
+    passport_file = folder / "source/scene_passport.json"
+    if not state_file.exists():
+        continue
+    try:
+        state = json.loads(state_file.read_text("utf-8"))
+        passport = json.loads(passport_file.read_text("utf-8")) if passport_file.exists() else {}
+    except Exception:
+        continue
+    automated_fixture = passport.get("width") == 800 and passport.get("height") == 600
+    if state.get("name") in names and not automated_fixture:
+        target = backup / folder.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(folder, target)
+PY
+
 python "$ROOT/release/patch_v062.py" "$RUNTIME"
+
+if [ -d "$NAMED_USER_BACKUP" ]; then
+  mkdir -p "$RUNTIME/data/projects"
+  cp -a "$NAMED_USER_BACKUP/." "$RUNTIME/data/projects/"
+  rm -rf "$NAMED_USER_BACKUP"
+fi
 
 python -m pip install --upgrade pip
 python -m pip install -r "$RUNTIME/requirements.txt"
