@@ -1,49 +1,97 @@
-# Marins Fasad Control Center
+# Marins Facade Control Center v0.6.0
 
 [![Открыть в GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Kontrakevich/MarinsFasad?quickstart=1)
 
-Панель управления конвейером подготовки архитектурных изображений:
+Чистая staged-сборка на базе интерфейса `Marins_EKB_Facade_OpenRouter_v0.5.5`.
 
-1. Коррекция геометрии исходника.
-2. Ручное подтверждение или отправка на доработку.
-3. Генерация окружения на базе подтвержденной геометрии.
-4. Подтверждение результата и сохранение в `data/projects/<project>/final/`.
-5. Размещение брендированной вывески по выделенной прямоугольной области.
-6. Версионирование рабочих skill после подтверждения результата.
+## Основной процесс
 
-## Запуск прямо через GitHub
+```text
+Source
+→ Geometry
+→ Approval
+→ Environment
+→ Approval / Final Lock
+→ Branding
+→ Approval
+```
 
-1. Нажмите кнопку **Открыть в GitHub Codespaces** выше.
-2. Подтвердите создание Codespace.
-3. Дождитесь установки зависимостей.
-4. Сервер запустится автоматически на порту `8070`.
-5. GitHub откроет панель в отдельной вкладке.
+## Реализовано
 
-Для API-ключей откройте настройки Codespaces репозитория и добавьте секреты:
+- project manager;
+- загрузка неизменяемого исходника;
+- Perspective Grid с четырьмя перемещаемыми угловыми точками;
+- внутренние пунктирные линии сетки;
+- Undo / Redo / Reset;
+- full-frame homography без crop по границе управляющей плоскости;
+- сравнение Source / Corrected;
+- отдельные approve/revise-циклы Geometry, Environment и Branding;
+- сохранение всех версий и комментариев;
+- Current / Revisions / History для каждого Skill;
+- system prompt, скомпилированный из текущего Skill, показывается до AI-запуска;
+- Environment запускается только из approved Geometry;
+- Final автоматически фиксируется после approved Environment;
+- интерактивное выделение зоны вывески;
+- Branding запускается только из locked Final;
+- OpenRouter image adapter;
+- redacted provider diagnostics без ключей и base64-изображений;
+- автоматический Codespaces startup и health-check.
 
-- `OPENROUTER_API_KEY`
-- `TOKENROUTER_API_KEY`
-- другие ключи провайдеров по мере подключения.
+## Запуск через GitHub
 
-Порт панели имеет приватную видимость: доступ к нему получает только владелец Codespace.
+1. Нажмите **Открыть в GitHub Codespaces**.
+2. Создайте Codespace на ветке `main`.
+3. Codespaces автоматически распакует сборку, установит зависимости, выполнит тесты и запустит порт `8070`.
+4. GitHub откроет панель в отдельной вкладке.
 
-## Запуск Windows
+Для AI-генераций добавьте repository Codespaces secret:
 
-1. Скопируйте `.env.example` в `.env` и заполните ключи.
-2. Запустите `01_INSTALL.bat`.
-3. Запустите `02_RUN.bat`.
-4. Откройте `http://127.0.0.1:8070`.
+```text
+OPENROUTER_API_KEY
+```
 
-## API
+Путь в GitHub:
 
-- `POST /api/projects` — создать проект.
-- `POST /api/projects/{id}/source` — загрузить исходник.
-- `POST /api/projects/{id}/geometry/run` — выполнить коррекцию геометрии.
-- `POST /api/projects/{id}/geometry/approve` — подтвердить геометрию.
-- `POST /api/projects/{id}/geometry/revise` — отправить комментарий на доработку.
-- `POST /api/projects/{id}/environment/run` — выполнить генерацию окружения.
-- `POST /api/projects/{id}/environment/approve` — подтвердить окружение и записать `final`.
-- `POST /api/projects/{id}/branding/run` — создать вариант с вывеской.
-- `POST /api/projects/{id}/branding/approve` — подтвердить брендирование.
+```text
+Settings → Secrets and variables → Codespaces → New repository secret
+```
 
-Текущая сборка содержит интерфейс, хранение проектов, этапы утверждения, журнал действий и версионирование skill. Внешние генераторы подключаются через адаптеры в `app/providers.py`.
+После добавления секрета перезапустите Codespace.
+
+## Ручной запуск в Codespaces
+
+```bash
+bash release/setup_v060.sh
+bash release/start_v060.sh
+```
+
+Лог сервера:
+
+```bash
+cat /tmp/marins-facade-v060.log
+```
+
+## Сборочная проверка
+
+Локально выполнены:
+
+- `python -m compileall app`;
+- 4 автоматических smoke/workflow tests;
+- FastAPI health endpoint;
+- локальный запуск Uvicorn.
+
+Живой платный вызов OpenRouter не выполнялся.
+
+## Release container
+
+Полная сборка хранится в:
+
+```text
+release/MarinsFacade_v0.6.0.zip.b64
+```
+
+Codespaces декодирует её в:
+
+```text
+.runtime/MarinsFacade_v0.6.0
+```
