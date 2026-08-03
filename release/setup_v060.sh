@@ -122,6 +122,7 @@ python "$ROOT/release/patch_v063.py" "$RUNTIME"
 python "$ROOT/release/patch_v064.py" "$RUNTIME"
 python "$ROOT/release/patch_v065.py" "$RUNTIME"
 python "$ROOT/release/patch_v066.py" "$RUNTIME"
+python "$ROOT/release/patch_v066_test_hotfix.py" "$RUNTIME"
 
 python -m pip install --upgrade pip
 python -m pip install -r "$RUNTIME/requirements.txt"
