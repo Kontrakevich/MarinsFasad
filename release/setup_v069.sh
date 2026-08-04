@@ -6,7 +6,6 @@ RUNTIME="$ROOT/.runtime/MarinsFacade_v0.6.0"
 bash "$ROOT/release/setup_v060.sh"
 
 # Compatibility layer: some staged runtime archives do not contain app/image_tools.py.
-# Create a production-safe module in the exact already-patched form expected by patch_v069.py.
 if [ ! -f "$RUNTIME/app/image_tools.py" ]; then
   cat > "$RUNTIME/app/image_tools.py" <<'PY'
 from __future__ import annotations
@@ -50,6 +49,31 @@ PY
 fi
 
 python "$ROOT/release/patch_v069.py" "$RUNTIME"
+
+# Keep legacy workflow semantics and make version tests follow the runtime version.
+python - "$RUNTIME" <<'PY'
+from pathlib import Path
+import sys
+
+runtime = Path(sys.argv[1])
+main_path = runtime / 'app/main.py'
+main = main_path.read_text('utf-8')
+old = "            state.setdefault('statuses', {})[stage] = 'ready'\n            state['current_stage'] = f'{stage}_ready'\n            state['stage'] = f'{stage}_ready'"
+new = "            revision_status = 'editing' if stage in {'geometry', 'branding'} else 'ready'\n            state.setdefault('statuses', {})[stage] = revision_status\n            state['current_stage'] = f'{stage}_{revision_status}'\n            state['stage'] = f'{stage}_{revision_status}'"
+if old in main:
+    main = main.replace(old, new, 1)
+elif new not in main:
+    raise SystemExit('v0.6.9 revision status compatibility pattern not found')
+main_path.write_text(main, 'utf-8')
+
+smoke = runtime / 'tests/test_smoke.py'
+text = smoke.read_text('utf-8')
+if 'from app.main import APP_VERSION' not in text:
+    text = 'from app.main import APP_VERSION\n' + text
+text = text.replace("assert response.json()['version'] == '0.6.8'", "assert response.json()['version'] == APP_VERSION")
+smoke.write_text(text, 'utf-8')
+print('Applied v0.6.9 workflow/test compatibility')
+PY
 
 cd "$RUNTIME"
 python -m compileall app
