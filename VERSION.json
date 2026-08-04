@@ -1,0 +1,9 @@
+{
+  "name": "Marins Facade Control Center",
+  "version": "0.6.8",
+  "status": "stable",
+  "runtime_base": "0.6.0",
+  "runtime_target": "0.6.8",
+  "port": 8070,
+  "default_branch": "main"
+}
