@@ -1,12 +1,13 @@
 {
   "name": "Marins Facade Control Center",
-  "version": "0.6.9",
+  "version": "0.7.0",
   "status": "development",
   "runtime_base": "0.6.0",
-  "runtime_target": "0.6.9",
+  "runtime_target": "0.7.0",
   "stable_tag": "v0.6.8",
   "port": 8070,
   "default_branch": "main",
   "quality_policy": "original_full_resolution",
-  "comment_policy": "ai_adapted_and_mandatory_in_final_prompt"
+  "comment_policy": "ai_adapted_and_mandatory_in_final_prompt",
+  "header_process_navigation": true
 }
