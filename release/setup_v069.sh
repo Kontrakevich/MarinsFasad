@@ -6,7 +6,7 @@ RUNTIME="$ROOT/.runtime/MarinsFacade_v0.6.0"
 bash "$ROOT/release/setup_v060.sh"
 
 # Compatibility layer: some staged runtime archives do not contain app/image_tools.py.
-# Create a minimal production-safe module before applying the v0.6.9 patch.
+# Create a production-safe module in the exact already-patched form expected by patch_v069.py.
 if [ ! -f "$RUNTIME/app/image_tools.py" ]; then
   cat > "$RUNTIME/app/image_tools.py" <<'PY'
 from __future__ import annotations
@@ -21,6 +21,8 @@ def prepare_technical_photos(source: str | Path, output: str | Path, max_w: int 
     out.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(source) as im:
         im = ImageOps.exif_transpose(im)
+        # v0.6.9: production pipeline always works at the EXIF-corrected original resolution.
+        # max_w/max_h remain only for backward-compatible config parsing and UI previews.
         work = im.copy()
         if out.suffix.lower() in {'.jpg', '.jpeg'}:
             work.convert('RGB').save(out, quality=100, subsampling=0)
