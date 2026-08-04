@@ -1,8 +1,8 @@
-# Marins Facade Control Center v0.6.0
+# Marins Facade Control Center v0.6.8
 
 [![Открыть в GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Kontrakevich/MarinsFasad?quickstart=1)
 
-Чистая staged-сборка на базе интерфейса `Marins_EKB_Facade_OpenRouter_v0.5.5`.
+Стабильная staged-сборка системы управления генерацией и согласованием фасадных решений. Исходный runtime `v0.6.0` автоматически обновляется патчами до фактической версии `v0.6.8` при выполнении setup-скрипта.
 
 ## Основной процесс
 
@@ -35,13 +35,14 @@ Source
 - Branding запускается только из locked Final;
 - OpenRouter image adapter;
 - redacted provider diagnostics без ключей и base64-изображений;
-- автоматический Codespaces startup и health-check.
+- автоматический Codespaces startup и health-check;
+- runtime patches `v0.6.1–v0.6.8`.
 
 ## Запуск через GitHub
 
 1. Нажмите **Открыть в GitHub Codespaces**.
 2. Создайте Codespace на ветке `main`.
-3. Codespaces автоматически распакует сборку, установит зависимости, выполнит тесты и запустит порт `8070`.
+3. Codespaces автоматически распакует базовую сборку, применит патчи до `v0.6.8`, установит зависимости, выполнит тесты и запустит порт `8070`.
 4. GitHub откроет панель в отдельной вкладке.
 
 Для AI-генераций добавьте repository Codespaces secret:
@@ -73,25 +74,33 @@ cat /tmp/marins-facade-v060.log
 
 ## Сборочная проверка
 
-Локально выполнены:
+Setup-скрипт выполняет:
 
 - `python -m compileall app`;
-- 4 автоматических smoke/workflow tests;
-- FastAPI health endpoint;
-- локальный запуск Uvicorn.
+- автоматические smoke/workflow tests;
+- FastAPI health-check;
+- запуск Uvicorn на порту `8070`.
 
-Живой платный вызов OpenRouter не выполнялся.
+Живой платный вызов OpenRouter требует настроенного `OPENROUTER_API_KEY`.
 
-## Release container
+## Release architecture
 
-Полная сборка хранится в:
+Базовый архив `v0.6.0` хранится частями в:
 
 ```text
-release/MarinsFacade_v0.6.0.zip.b64
+release/v060_xz
 ```
 
-Codespaces декодирует её в:
+Codespaces разворачивает runtime в:
 
 ```text
 .runtime/MarinsFacade_v0.6.0
+```
+
+После развёртывания setup-скрипт последовательно применяет патчи и формирует фактическую стабильную сборку `v0.6.8`.
+
+## Текущая стабильная версия
+
+```text
+v0.6.8
 ```
