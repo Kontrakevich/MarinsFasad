@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import io
 import json
 import math
 import os
@@ -24,14 +23,15 @@ class AIEngineError(RuntimeError):
 class OpenRouterImageEngine:
     endpoint = "https://openrouter.ai/api/v1/images"
     image_models_endpoint = "https://openrouter.ai/api/v1/images/models"
-    fallback_max_request_bytes = 50 * 1024 * 1024
+    transport_engine_version = "2.1.0"
+    gateway_hard_max_request_bytes = 50 * 1024 * 1024
 
     def __init__(self) -> None:
         self.api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
         self.model = os.getenv("OPENROUTER_IMAGE_MODEL", "openai/gpt-image-1").strip()
         self.timeout = int(os.getenv("OPENROUTER_IMAGE_TIMEOUT", "240"))
         self.capability_timeout = int(os.getenv("OPENROUTER_CAPABILITY_TIMEOUT", "15"))
-        self.safety_margin = min(0.97, max(0.5, float(os.getenv("OPENROUTER_REQUEST_SAFETY_MARGIN", "0.90"))))
+        self.safety_margin = min(0.95, max(0.50, float(os.getenv("OPENROUTER_REQUEST_SAFETY_MARGIN", "0.88"))))
         self.max_input_side = max(0, int(os.getenv("OPENROUTER_MAX_INPUT_SIDE", "0")))
         self.max_input_pixels = max(0, int(os.getenv("OPENROUTER_MAX_INPUT_PIXELS", "0")))
         self.transport_format = os.getenv("OPENROUTER_TRANSPORT_FORMAT", "webp").strip().lower()
@@ -91,17 +91,28 @@ class OpenRouterImageEngine:
                 return int(match.group(1))
         return None
 
-    def discover_capabilities(self) -> dict:
-        """Discover current model capabilities and request-size hints.
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
-        OpenRouter exposes definitive per-endpoint image-model parameter records.
-        The gateway body-size ceiling is not guaranteed to be present in that
-        schema, so the engine also checks response headers and then uses the
-        configured/observed safe fallback.
-        """
+    def _effective_limit(self, candidate: int | None = None) -> int:
+        values = [self.gateway_hard_max_request_bytes]
         configured = int(os.getenv("OPENROUTER_MAX_REQUEST_BYTES", "0") or 0)
-        max_request_bytes = configured or self._learned_max_request_bytes or self.fallback_max_request_bytes
-        limit_source = "environment" if configured else "observed_413" if self._learned_max_request_bytes else "openrouter_gateway_fallback"
+        if configured > 0:
+            values.append(configured)
+        if self._learned_max_request_bytes:
+            values.append(self._learned_max_request_bytes)
+        if candidate:
+            values.append(candidate)
+        return max(1024 * 1024, min(values))
+
+    def discover_capabilities(self) -> dict:
+        max_request_bytes = self._effective_limit()
+        limit_source = "gateway_hard_cap"
         supported_parameters: dict[str, Any] = {}
         providers: list[str] = []
         discovery_errors: list[str] = []
@@ -121,22 +132,28 @@ class OpenRouterImageEngine:
                             supported_parameters.setdefault(key, descriptor)
                 else:
                     discovery_errors.append(f"model_endpoints_http_{response.status_code}")
-            except Exception as exc:  # capability discovery must never block production
+            except Exception as exc:
                 discovery_errors.append(f"model_endpoints:{type(exc).__name__}")
 
         if self.api_key:
             try:
                 response = requests.options(self.endpoint, headers=self.headers, timeout=self.capability_timeout)
                 header_limit = self._header_limit(response.headers)
-                if header_limit and not configured:
-                    max_request_bytes = header_limit
-                    limit_source = "openrouter_response_header"
+                if header_limit:
+                    max_request_bytes = self._effective_limit(header_limit)
+                    limit_source = "response_header_capped"
             except Exception as exc:
                 discovery_errors.append(f"options:{type(exc).__name__}")
+
+        if self._learned_max_request_bytes:
+            max_request_bytes = self._effective_limit(self._learned_max_request_bytes)
+            limit_source = "observed_413_capped"
 
         return {
             "provider": "openrouter",
             "model": self.model,
+            "transport_engine_version": self.transport_engine_version,
+            "gateway_hard_max_request_bytes": self.gateway_hard_max_request_bytes,
             "max_request_bytes": int(max_request_bytes),
             "safe_request_bytes": int(max_request_bytes * self.safety_margin),
             "request_limit_source": limit_source,
@@ -169,14 +186,6 @@ class OpenRouterImageEngine:
             ],
         }
 
-    @staticmethod
-    def _sha256(path: Path) -> str:
-        digest = hashlib.sha256()
-        with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-
     def _save_transport_geometry(self, image: Image.Image, directory: Path) -> tuple[Path, str]:
         preferred = self.transport_format
         if preferred == "webp":
@@ -207,14 +216,17 @@ class OpenRouterImageEngine:
         height: int,
         forced_max_request_bytes: int | None = None,
     ) -> dict:
-        """Create temporary provider transport copies without touching masters."""
         output_dir.mkdir(parents=True, exist_ok=True)
         capabilities = self.discover_capabilities()
         if forced_max_request_bytes:
-            capabilities["max_request_bytes"] = int(forced_max_request_bytes)
-            capabilities["safe_request_bytes"] = int(forced_max_request_bytes * self.safety_margin)
-            capabilities["request_limit_source"] = "observed_413_retry"
-        safe_request_bytes = int(capabilities["safe_request_bytes"])
+            capped = self._effective_limit(forced_max_request_bytes)
+            capabilities["max_request_bytes"] = capped
+            capabilities["safe_request_bytes"] = int(capped * self.safety_margin)
+            capabilities["request_limit_source"] = "forced_or_observed_limit_capped"
+        safe_request_bytes = min(
+            int(capabilities["safe_request_bytes"]),
+            int(self.gateway_hard_max_request_bytes * self.safety_margin),
+        )
 
         with Image.open(geometry_image) as source:
             geometry_master = ImageOps.exif_transpose(source).convert("RGBA")
@@ -232,27 +244,27 @@ class OpenRouterImageEngine:
         if self.max_input_pixels and original_size[0] * original_size[1] > self.max_input_pixels:
             scale = min(scale, math.sqrt(self.max_input_pixels / float(original_size[0] * original_size[1])))
 
-        attempt = 0
+        request_body = b""
         final_payload: dict | None = None
         geometry_path: Path | None = None
         mask_path: Path | None = None
         encoding = ""
-        request_body = b""
+        attempt = 0
 
-        while attempt < 14:
+        while attempt < 18:
             attempt += 1
             target_width = max(64, int(round(original_size[0] * scale)))
             target_height = max(64, int(round(original_size[1] * scale)))
             target_size = (target_width, target_height)
+
             if target_size == original_size:
                 transport_geometry = geometry_master.copy()
                 transport_mask = mask_master.copy()
             else:
                 transport_geometry = geometry_master.resize(target_size, Image.Resampling.LANCZOS)
                 transport_mask = mask_master.resize(target_size, Image.Resampling.NEAREST)
-            # Keep the provider mask strictly binary after transport resizing.
-            transport_mask = transport_mask.point(lambda value: 255 if value >= 128 else 0, mode="L")
 
+            transport_mask = transport_mask.point(lambda value: 255 if value >= 128 else 0, mode="L")
             geometry_path, encoding = self._save_transport_geometry(transport_geometry, output_dir)
             mask_path = self._save_transport_mask(transport_mask, output_dir)
             final_payload = self._build_payload(
@@ -266,28 +278,33 @@ class OpenRouterImageEngine:
             if len(request_body) <= safe_request_bytes:
                 break
 
-            fixed_overhead = len(request_body) - int((geometry_path.stat().st_size + mask_path.stat().st_size) * 4 / 3)
-            available = safe_request_bytes - max(0, fixed_overhead)
-            if available <= 0:
-                raise AIEngineError(
-                    "Prompt and JSON overhead exceed the provider request limit before image data is included",
-                    details={"safe_request_bytes": safe_request_bytes, "request_body_bytes": len(request_body)},
-                )
-            ratio = math.sqrt(max(0.01, safe_request_bytes / float(len(request_body)))) * 0.92
-            scale *= min(0.92, ratio)
+            ratio = math.sqrt(safe_request_bytes / float(len(request_body))) * 0.88
+            scale *= min(0.88, max(0.20, ratio))
             if min(target_size) <= 64:
                 raise AIEngineError(
-                    "Unable to fit generation references into the provider request limit",
+                    "Unable to fit generation references into the OpenRouter request limit",
                     details={"safe_request_bytes": safe_request_bytes, "request_body_bytes": len(request_body)},
                 )
         else:
-            raise AIEngineError("Unable to prepare provider transport images after 14 attempts")
+            raise AIEngineError(
+                "Unable to prepare OpenRouter transport images after 18 attempts",
+                details={"safe_request_bytes": safe_request_bytes, "request_body_bytes": len(request_body)},
+            )
 
         assert final_payload is not None and geometry_path is not None and mask_path is not None
-        transport_size = Image.open(geometry_path).size
+        if len(request_body) > safe_request_bytes:
+            raise AIEngineError(
+                "Transport preflight rejected an oversized request before network transmission",
+                details={"safe_request_bytes": safe_request_bytes, "request_body_bytes": len(request_body)},
+            )
+
+        with Image.open(geometry_path) as transport_image:
+            transport_size = transport_image.size
+
         metadata = {
             "provider": "openrouter",
             "model": self.model,
+            "transport_engine_version": self.transport_engine_version,
             "master_geometry_path": str(geometry_image),
             "master_mask_path": str(outpaint_mask),
             "master_width": original_size[0],
@@ -301,6 +318,7 @@ class OpenRouterImageEngine:
             "request_body_bytes": len(request_body),
             "max_request_bytes": capabilities["max_request_bytes"],
             "safe_request_bytes": safe_request_bytes,
+            "gateway_hard_max_request_bytes": self.gateway_hard_max_request_bytes,
             "request_limit_source": capabilities["request_limit_source"],
             "resized_for_provider": transport_size != original_size,
             "scale": round(transport_size[0] / float(original_size[0]), 6),
@@ -323,6 +341,51 @@ class OpenRouterImageEngine:
         )
         return payload, self._request_bytes(payload)
 
+    def _hard_preflight(
+        self,
+        *,
+        prompt: str,
+        geometry_image: Path,
+        outpaint_mask: Path,
+        transport_dir: Path,
+        width: int,
+        height: int,
+        prepared: dict,
+    ) -> tuple[dict, dict, bytes]:
+        payload, request_body = self._prepared_payload(
+            prompt=prompt,
+            prepared_input=prepared,
+            width=width,
+            height=height,
+        )
+        hard_safe = int(self.gateway_hard_max_request_bytes * self.safety_margin)
+        if len(request_body) > hard_safe:
+            prepared = self.prepare_environment_inputs(
+                prompt=prompt,
+                geometry_image=geometry_image,
+                outpaint_mask=outpaint_mask,
+                output_dir=transport_dir,
+                width=width,
+                height=height,
+                forced_max_request_bytes=self.gateway_hard_max_request_bytes,
+            )
+            payload, request_body = self._prepared_payload(
+                prompt=prompt,
+                prepared_input=prepared,
+                width=width,
+                height=height,
+            )
+        if len(request_body) > hard_safe:
+            raise AIEngineError(
+                "Hard preflight blocked an oversized OpenRouter request",
+                details={
+                    "transport": prepared,
+                    "request_body_bytes": len(request_body),
+                    "hard_safe_request_bytes": hard_safe,
+                },
+            )
+        return prepared, payload, request_body
+
     def generate_environment(
         self,
         *,
@@ -336,6 +399,7 @@ class OpenRouterImageEngine:
     ) -> dict:
         if not self.api_key:
             raise AIEngineError("OPENROUTER_API_KEY is not configured")
+
         output_dir.mkdir(parents=True, exist_ok=True)
         transport_dir = output_dir / "transport"
         prepared = prepared_input or self.prepare_environment_inputs(
@@ -346,37 +410,61 @@ class OpenRouterImageEngine:
             width=width,
             height=height,
         )
+        prepared, payload, request_body = self._hard_preflight(
+            prompt=prompt,
+            geometry_image=geometry_image,
+            outpaint_mask=outpaint_mask,
+            transport_dir=transport_dir,
+            width=width,
+            height=height,
+            prepared=prepared,
+        )
 
-        payload, request_body = self._prepared_payload(prompt=prompt, prepared_input=prepared, width=width, height=height)
         started = time.time()
         response = requests.post(self.endpoint, headers=self.headers, data=request_body, timeout=self.timeout)
+        retry_count = 0
 
         if response.status_code == 413:
-            observed_limit = self._extract_request_limit(response.text)
-            if observed_limit:
-                self._learned_max_request_bytes = observed_limit
-                prepared = self.prepare_environment_inputs(
-                    prompt=prompt,
-                    geometry_image=geometry_image,
-                    outpaint_mask=outpaint_mask,
-                    output_dir=transport_dir,
-                    width=width,
-                    height=height,
-                    forced_max_request_bytes=observed_limit,
-                )
-                payload, request_body = self._prepared_payload(prompt=prompt, prepared_input=prepared, width=width, height=height)
-                response = requests.post(self.endpoint, headers=self.headers, data=request_body, timeout=self.timeout)
+            retry_count = 1
+            observed_limit = self._extract_request_limit(response.text) or self.gateway_hard_max_request_bytes
+            self._learned_max_request_bytes = self._effective_limit(observed_limit)
+            prepared = self.prepare_environment_inputs(
+                prompt=prompt,
+                geometry_image=geometry_image,
+                outpaint_mask=outpaint_mask,
+                output_dir=transport_dir,
+                width=width,
+                height=height,
+                forced_max_request_bytes=self._learned_max_request_bytes,
+            )
+            prepared, payload, request_body = self._hard_preflight(
+                prompt=prompt,
+                geometry_image=geometry_image,
+                outpaint_mask=outpaint_mask,
+                transport_dir=transport_dir,
+                width=width,
+                height=height,
+                prepared=prepared,
+            )
+            response = requests.post(self.endpoint, headers=self.headers, data=request_body, timeout=self.timeout)
 
         elapsed = round(time.time() - started, 3)
         if response.status_code >= 400:
             raise AIEngineError(
                 f"OpenRouter {response.status_code}: {response.text[:2000]}",
-                details={"transport": prepared, "request_body_bytes": len(request_body)},
+                details={
+                    "transport": prepared,
+                    "request_body_bytes": len(request_body),
+                    "retry_count": retry_count,
+                    "transport_engine_version": self.transport_engine_version,
+                },
             )
+
         data = response.json()
         items = data.get("data") or []
         if not items or not items[0].get("b64_json"):
             raise AIEngineError("OpenRouter returned no image data", details={"transport": prepared})
+
         raw = base64.b64decode(items[0]["b64_json"])
         raw_path = output_dir / "provider-output.png"
         raw_path.write_bytes(raw)
@@ -385,17 +473,17 @@ class OpenRouterImageEngine:
             output_size = oriented.size
             if output_size != (width, height):
                 raise AIEngineError(
-                    f"Provider returned {output_size[0]}x{output_size[1]}, expected exact master canvas {width}x{height}. "
-                    "The result was retained for diagnostics but not promoted.",
+                    f"Provider returned {output_size[0]}x{output_size[1]}, expected exact master canvas {width}x{height}. The result was retained for diagnostics but not promoted.",
                     details={"transport": prepared, "provider_output": str(raw_path)},
                 )
-            final = oriented.convert("RGB")
             candidate = output_dir / "candidate.png"
-            final.save(candidate, format="PNG", optimize=False)
+            oriented.convert("RGB").save(candidate, format="PNG", optimize=False)
+
         metadata = {
             "provider": "openrouter",
             "model": self.model,
             "endpoint": self.endpoint,
+            "transport_engine_version": self.transport_engine_version,
             "duration_seconds": elapsed,
             "width": width,
             "height": height,
@@ -404,6 +492,7 @@ class OpenRouterImageEngine:
             "usage": data.get("usage") or {},
             "request": {key: value for key, value in payload.items() if key != "input_references"},
             "request_body_bytes": len(request_body),
+            "retry_count": retry_count,
             "transport": prepared,
         }
         (output_dir / "generation.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), "utf-8")
