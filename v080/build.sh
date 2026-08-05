@@ -23,8 +23,12 @@ else
   echo "Node.js not found; skipping optional frontend JavaScript syntax check"
 fi
 
+# Always expose the v080 root as the first Python import location. This makes
+# test collection deterministic even when pytest is installed as a user-level
+# console script outside the repository.
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 rm -rf .test-data
-MARINS_DATA_ROOT="$ROOT/.test-data/projects" pytest -q
+MARINS_DATA_ROOT="$ROOT/.test-data/projects" python -m pytest -q
 rm -rf .test-data
 python - <<'PY'
 from app.ai_engine import OpenRouterImageEngine
