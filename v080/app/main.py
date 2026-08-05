@@ -46,6 +46,30 @@ def _compile_prompt(project_id: str, stage: str) -> dict:
     return prompts.compile(context, projects.path(project_id))
 
 
+def _relative_path(value: str | None, project_dir: Path) -> str | None:
+    if not value:
+        return value
+    path = Path(value)
+    try:
+        return str(path.resolve().relative_to(project_dir.resolve()))
+    except (ValueError, OSError):
+        return str(path)
+
+
+def _transport_for_state(transport: dict | None, project_dir: Path) -> dict:
+    if not transport:
+        return {}
+    output = dict(transport)
+    for key in (
+        "master_geometry_path",
+        "master_mask_path",
+        "transport_geometry_path",
+        "transport_mask_path",
+    ):
+        output[key] = _relative_path(output.get(key), project_dir)
+    return output
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse((STATIC_ROOT / "index.html").read_text("utf-8"))
@@ -53,7 +77,23 @@ def index() -> HTMLResponse:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "name": APP_NAME, "version": APP_VERSION, "runtime": "standalone-v080", "image_provider": "openrouter", "image_model": ai_images.model, "image_configured": bool(ai_images.api_key)}
+    return {
+        "status": "ok",
+        "name": APP_NAME,
+        "version": APP_VERSION,
+        "runtime": "standalone-v080",
+        "image_provider": "openrouter",
+        "image_model": ai_images.model,
+        "image_configured": bool(ai_images.api_key),
+        "transport_policy": "provider-aware-temporary-copy",
+    }
+
+
+@app.get("/api/provider/image-capabilities")
+def image_capabilities() -> dict:
+    if not ai_images.api_key:
+        raise HTTPException(409, "OPENROUTER_API_KEY is not configured")
+    return ai_images.discover_capabilities()
 
 
 @app.get("/api/projects")
@@ -82,7 +122,17 @@ def get_history(project_id: str, limit: int = 100) -> list[dict]:
 @app.get("/api/projects/{project_id}/diagnostics")
 def get_diagnostics(project_id: str) -> dict:
     state = projects.read(project_id)
-    return {"project_id": project_id, "version": state.get("version"), "pipeline": state.get("pipeline", {}), "master_canvas": state.get("master_canvas"), "geometry": state.get("geometry"), "generation": state.get("generation"), "quality": state.get("quality", {}), "events": projects.history(project_id, 30)}
+    return {
+        "project_id": project_id,
+        "version": state.get("version"),
+        "pipeline": state.get("pipeline", {}),
+        "master_canvas": state.get("master_canvas"),
+        "geometry": state.get("geometry"),
+        "generation_input": state.get("generation_input"),
+        "generation": state.get("generation"),
+        "quality": state.get("quality", {}),
+        "events": projects.history(project_id, 30),
+    }
 
 
 @app.post("/api/projects/{project_id}/source")
@@ -103,6 +153,7 @@ async def upload_source(project_id: str, file: UploadFile = File(...)) -> dict:
         state["master_canvas"] = {"width": master["width"], "height": master["height"]}
         state["active_stage"] = "geometry"
         state.pop("geometry", None)
+        state.pop("generation_input", None)
         state.pop("generation", None)
         projects.write(project_id, state)
         projects.record(project_id, "SourceUploaded", {"filename": file.filename, "width": master["width"], "height": master["height"], "master": state["assets"]["source_master"]})
@@ -133,6 +184,8 @@ def apply_geometry_grid(project_id: str, quad_json: str = Form(...)) -> dict:
     state["geometry"] = {"quad": points, "transparent_pixels": result["transparent_pixels"], "transparent_ratio": result["transparent_ratio"], "canvas_preserved": result["canvas_preserved"], "status": "review"}
     state["pipeline"]["geometry"] = "ready"
     state["active_stage"] = "geometry"
+    state.pop("generation_input", None)
+    state.pop("generation", None)
     projects.write(project_id, state)
     projects.record(project_id, "GeometryGridApplied", state["geometry"])
     return projects.read(project_id)
@@ -179,22 +232,93 @@ def generate_environment(project_id: str) -> dict:
     canvas = state.get("master_canvas") or {}
     if not geometry_rel or not mask_rel or not canvas:
         raise HTTPException(409, "Geometry candidate, outpaint mask or master canvas is missing")
+
     compiled = _compile_prompt(project_id, "environment")
+    geometry_path = project_dir / geometry_rel
+    mask_path = project_dir / mask_rel
+    transport_dir = project_dir / "images" / "transport" / "environment"
+
+    try:
+        prepared = ai_images.prepare_environment_inputs(
+            prompt=compiled["prompt"],
+            geometry_image=geometry_path,
+            outpaint_mask=mask_path,
+            output_dir=transport_dir,
+            width=int(canvas["width"]),
+            height=int(canvas["height"]),
+        )
+    except AIEngineError as exc:
+        state = projects.read(project_id)
+        state["pipeline"]["environment"] = "error"
+        state["generation_input"] = _transport_for_state(exc.details.get("transport") or exc.details, project_dir)
+        state["generation"] = {"stage": "environment", "provider": "openrouter", "model": ai_images.model, "status": "error", "error": str(exc)}
+        projects.write(project_id, state)
+        projects.record(project_id, "GenerationPayloadPreparationFailed", {"error": str(exc), "details": exc.details})
+        raise HTTPException(502, str(exc))
+
+    prepared_state = _transport_for_state(prepared, project_dir)
+    state = projects.read(project_id)
+    state["generation_input"] = prepared_state
     state["pipeline"]["environment"] = "processing"
     state["active_stage"] = "environment"
     projects.write(project_id, state)
+    projects.record(
+        project_id,
+        "GenerationPayloadPrepared",
+        {
+            "master": f"{prepared_state.get('master_width')}x{prepared_state.get('master_height')}",
+            "transport": f"{prepared_state.get('transport_width')}x{prepared_state.get('transport_height')}",
+            "request_body_bytes": prepared_state.get("request_body_bytes"),
+            "safe_request_bytes": prepared_state.get("safe_request_bytes"),
+            "resized_for_provider": prepared_state.get("resized_for_provider"),
+            "request_limit_source": prepared_state.get("request_limit_source"),
+        },
+    )
     projects.record(project_id, "EnvironmentGenerationStarted", {"model": ai_images.model, "prompt": compiled.get("path")})
+
     try:
-        result = ai_images.generate_environment(prompt=compiled["prompt"], geometry_image=project_dir / geometry_rel, outpaint_mask=project_dir / mask_rel, output_dir=project_dir / "images" / "stages" / "environment", width=int(canvas["width"]), height=int(canvas["height"]))
+        result = ai_images.generate_environment(
+            prompt=compiled["prompt"],
+            geometry_image=geometry_path,
+            outpaint_mask=mask_path,
+            output_dir=project_dir / "images" / "stages" / "environment",
+            width=int(canvas["width"]),
+            height=int(canvas["height"]),
+            prepared_input=prepared,
+        )
         candidate = Path(result["candidate"])
         preview = images.make_preview(candidate, project_dir, name="environment-candidate")
         report = quality.inspect(project_dir / state["assets"]["source_master"], candidate)
         if not report.get("passed"):
-            raise AIEngineError(f"Environment candidate failed quality control: {report}")
+            raise AIEngineError(f"Environment candidate failed quality control: {report}", details={"transport": result.get("transport")})
+
         state = projects.read(project_id)
+        final_transport = _transport_for_state(result.get("transport"), project_dir)
+        if final_transport and final_transport != prepared_state:
+            projects.record(
+                project_id,
+                "GenerationPayloadAdjusted",
+                {
+                    "request_body_bytes": final_transport.get("request_body_bytes"),
+                    "max_request_bytes": final_transport.get("max_request_bytes"),
+                    "transport_width": final_transport.get("transport_width"),
+                    "transport_height": final_transport.get("transport_height"),
+                    "request_limit_source": final_transport.get("request_limit_source"),
+                },
+            )
+        state["generation_input"] = final_transport or prepared_state
         state["assets"]["environment_candidate"] = str(candidate.relative_to(project_dir))
         state["assets"]["environment_preview"] = str(Path(preview["path"]).relative_to(project_dir))
-        state["generation"] = {"stage": "environment", "provider": result["provider"], "model": result["model"], "duration_seconds": result["duration_seconds"], "usage": result.get("usage") or {}, "status": "review"}
+        state["generation"] = {
+            "stage": "environment",
+            "provider": result["provider"],
+            "model": result["model"],
+            "duration_seconds": result["duration_seconds"],
+            "usage": result.get("usage") or {},
+            "request_body_bytes": result.get("request_body_bytes"),
+            "transport": state["generation_input"],
+            "status": "review",
+        }
         state.setdefault("quality", {})["environment_candidate"] = report
         state["pipeline"]["environment"] = "ready"
         projects.write(project_id, state)
@@ -202,8 +326,19 @@ def generate_environment(project_id: str) -> dict:
         return projects.read(project_id)
     except AIEngineError as exc:
         state = projects.read(project_id)
+        transport = exc.details.get("transport") if isinstance(exc.details, dict) else None
+        if transport:
+            state["generation_input"] = _transport_for_state(transport, project_dir)
         state["pipeline"]["environment"] = "error"
-        state["generation"] = {"stage": "environment", "provider": "openrouter", "model": ai_images.model, "status": "error", "error": str(exc)}
+        state["generation"] = {
+            "stage": "environment",
+            "provider": "openrouter",
+            "model": ai_images.model,
+            "status": "error",
+            "error": str(exc),
+            "request_body_bytes": exc.details.get("request_body_bytes") if isinstance(exc.details, dict) else None,
+            "transport": state.get("generation_input"),
+        }
         projects.write(project_id, state)
         projects.record(project_id, "EnvironmentGenerationFailed", state["generation"])
         raise HTTPException(502, str(exc))
