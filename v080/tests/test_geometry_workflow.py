@@ -30,7 +30,7 @@ def create_with_source() -> dict:
     return uploaded.json()
 
 
-def test_apply_grid_preserves_master_canvas_and_creates_mask():
+def test_apply_grid_preserves_master_canvas_and_creates_real_mask():
     state = create_with_source()
     project_id = state["id"]
     quad = [
@@ -47,6 +47,8 @@ def test_apply_grid_preserves_master_canvas_and_creates_mask():
     state = response.json()
     assert state["master_canvas"] == {"width": 800, "height": 600}
     assert state["geometry"]["canvas_preserved"] is True
+    assert state["geometry"]["transparent_pixels"] > 0
+    assert state["geometry"]["transparent_ratio"] > 0
     assert state["assets"]["geometry_candidate"].endswith("candidate.png")
     assert state["assets"]["geometry_outpaint_mask"].endswith("outpaint-mask.png")
 
@@ -55,22 +57,39 @@ def test_apply_grid_preserves_master_canvas_and_creates_mask():
     with Image.open(io.BytesIO(candidate.content)) as image:
         assert image.size == (800, 600)
         assert image.mode == "RGBA"
+        alpha = image.getchannel("A")
+        assert alpha.getextrema()[0] == 0
+        assert alpha.getextrema()[1] == 255
+
+    mask = client.get(f"/api/projects/{project_id}/assets/geometry_outpaint_mask")
+    assert mask.status_code == 200
+    with Image.open(io.BytesIO(mask.content)) as image:
+        assert image.size == (800, 600)
+        assert image.mode == "L"
+        assert image.getextrema() == (0, 255)
 
 
 def test_geometry_approve_unlocks_environment_and_records_event():
     state = create_with_source()
     project_id = state["id"]
-    quad = [{"x": 0, "y": 0}, {"x": 799, "y": 0}, {"x": 799, "y": 599}, {"x": 0, "y": 599}]
+    quad = [
+        {"x": 70, "y": 40},
+        {"x": 730, "y": 65},
+        {"x": 760, "y": 560},
+        {"x": 45, "y": 535},
+    ]
     applied = client.post(
         f"/api/projects/{project_id}/geometry/apply-grid",
         data={"quad_json": json.dumps(quad)},
     )
     assert applied.status_code == 200
+    assert applied.json()["geometry"]["transparent_pixels"] > 0
     approved = client.post(f"/api/projects/{project_id}/geometry/approve")
     assert approved.status_code == 200
     state = approved.json()
     assert state["pipeline"]["geometry"] == "approved"
     assert state["pipeline"]["environment"] == "ready"
+    assert state["geometry"]["status"] == "approved"
     history = client.get(f"/api/projects/{project_id}/history").json()
     assert any(event["type"] == "GeometryApproved" for event in history)
 
@@ -78,5 +97,8 @@ def test_geometry_approve_unlocks_environment_and_records_event():
 def test_geometry_revision_requires_comment():
     state = create_with_source()
     project_id = state["id"]
-    response = client.post(f"/api/projects/{project_id}/geometry/revise", data={"comment": ""})
+    response = client.post(
+        f"/api/projects/{project_id}/geometry/revise",
+        data={"comment": ""},
+    )
     assert response.status_code == 422
