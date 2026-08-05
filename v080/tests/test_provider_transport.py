@@ -20,23 +20,24 @@ def make_mask(path: Path, size=(1200, 900)):
 def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     geometry = tmp_path / "geometry.png"
     mask = tmp_path / "mask.png"
-    make_geometry(geometry)
-    make_mask(mask)
+    source_size = (2400, 1800)
+    make_geometry(geometry, source_size)
+    make_mask(mask, source_size)
     geometry_before = geometry.read_bytes()
     mask_before = mask.read_bytes()
 
     engine = OpenRouterImageEngine()
     engine.max_input_side = 0
     engine.max_input_pixels = 0
-    engine.transmit_max_request_bytes = 260000
+    engine.transmit_max_request_bytes = 2 * 1024 * 1024
     monkeypatch.setattr(engine, "discover_capabilities", lambda: {
         "provider": "openrouter",
         "model": engine.model,
         "transport_engine_version": engine.transport_engine_version,
         "gateway_hard_max_request_bytes": engine.gateway_hard_max_request_bytes,
         "max_request_bytes": 52428800,
-        "transmit_max_request_bytes": 260000,
-        "target_request_bytes": 260000,
+        "transmit_max_request_bytes": engine.transmit_max_request_bytes,
+        "target_request_bytes": engine.transmit_max_request_bytes,
         "request_limit_source": "test",
         "supported_parameters": {},
         "providers": [],
@@ -48,8 +49,8 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
         geometry_image=geometry,
         outpaint_mask=mask,
         output_dir=tmp_path / "transport",
-        width=1200,
-        height=900,
+        width=source_size[0],
+        height=source_size[1],
     )
 
     assert result["request_body_bytes"] <= result["target_request_bytes"]
