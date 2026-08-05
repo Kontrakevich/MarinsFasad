@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 APP_NAME = "Marins Facade Control Center"
-APP_VERSION = "0.8.0-dev"
+APP_VERSION = "0.8.0"
 PORT = int(os.getenv("PORT", "8070"))
 ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = Path(os.getenv("MARINS_DATA_ROOT", ROOT / "data" / "projects"))
