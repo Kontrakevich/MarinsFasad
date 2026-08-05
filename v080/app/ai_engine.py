@@ -23,18 +23,24 @@ class AIEngineError(RuntimeError):
 class OpenRouterImageEngine:
     endpoint = "https://openrouter.ai/api/v1/images"
     image_models_endpoint = "https://openrouter.ai/api/v1/images/models"
-    transport_engine_version = "2.1.0"
+    transport_engine_version = "2.2.0"
     gateway_hard_max_request_bytes = 50 * 1024 * 1024
+    default_transmit_max_request_bytes = 32 * 1024 * 1024
+    emergency_retry_max_request_bytes = 20 * 1024 * 1024
 
     def __init__(self) -> None:
         self.api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
         self.model = os.getenv("OPENROUTER_IMAGE_MODEL", "openai/gpt-image-1").strip()
         self.timeout = int(os.getenv("OPENROUTER_IMAGE_TIMEOUT", "240"))
         self.capability_timeout = int(os.getenv("OPENROUTER_CAPABILITY_TIMEOUT", "15"))
-        self.safety_margin = min(0.95, max(0.50, float(os.getenv("OPENROUTER_REQUEST_SAFETY_MARGIN", "0.88"))))
+        configured_transmit = int(os.getenv("OPENROUTER_TRANSMIT_MAX_BYTES", "0") or 0)
+        self.transmit_max_request_bytes = min(
+            self.default_transmit_max_request_bytes,
+            configured_transmit if configured_transmit > 0 else self.default_transmit_max_request_bytes,
+        )
         self.max_input_side = max(0, int(os.getenv("OPENROUTER_MAX_INPUT_SIDE", "0")))
         self.max_input_pixels = max(0, int(os.getenv("OPENROUTER_MAX_INPUT_PIXELS", "0")))
-        self.transport_format = os.getenv("OPENROUTER_TRANSPORT_FORMAT", "webp").strip().lower()
+        self.transport_quality = min(98, max(75, int(os.getenv("OPENROUTER_TRANSPORT_QUALITY", "92"))))
         self._learned_max_request_bytes: int | None = None
 
     @property
@@ -44,6 +50,7 @@ class OpenRouterImageEngine:
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/Kontrakevich/MarinsFasad",
             "X-Title": "Marins Facade Control Center",
+            "X-Marins-Transport-Engine": self.transport_engine_version,
         }
 
     @staticmethod
@@ -99,7 +106,7 @@ class OpenRouterImageEngine:
                 digest.update(chunk)
         return digest.hexdigest()
 
-    def _effective_limit(self, candidate: int | None = None) -> int:
+    def _effective_gateway_limit(self, candidate: int | None = None) -> int:
         values = [self.gateway_hard_max_request_bytes]
         configured = int(os.getenv("OPENROUTER_MAX_REQUEST_BYTES", "0") or 0)
         if configured > 0:
@@ -110,8 +117,12 @@ class OpenRouterImageEngine:
             values.append(candidate)
         return max(1024 * 1024, min(values))
 
+    def _target_request_bytes(self, candidate: int | None = None) -> int:
+        gateway_limit = self._effective_gateway_limit(candidate)
+        return max(1024 * 1024, min(self.transmit_max_request_bytes, int(gateway_limit * 0.64)))
+
     def discover_capabilities(self) -> dict:
-        max_request_bytes = self._effective_limit()
+        max_request_bytes = self._effective_gateway_limit()
         limit_source = "gateway_hard_cap"
         supported_parameters: dict[str, Any] = {}
         providers: list[str] = []
@@ -140,13 +151,13 @@ class OpenRouterImageEngine:
                 response = requests.options(self.endpoint, headers=self.headers, timeout=self.capability_timeout)
                 header_limit = self._header_limit(response.headers)
                 if header_limit:
-                    max_request_bytes = self._effective_limit(header_limit)
+                    max_request_bytes = self._effective_gateway_limit(header_limit)
                     limit_source = "response_header_capped"
             except Exception as exc:
                 discovery_errors.append(f"options:{type(exc).__name__}")
 
         if self._learned_max_request_bytes:
-            max_request_bytes = self._effective_limit(self._learned_max_request_bytes)
+            max_request_bytes = self._effective_gateway_limit(self._learned_max_request_bytes)
             limit_source = "observed_413_capped"
 
         return {
@@ -155,9 +166,9 @@ class OpenRouterImageEngine:
             "transport_engine_version": self.transport_engine_version,
             "gateway_hard_max_request_bytes": self.gateway_hard_max_request_bytes,
             "max_request_bytes": int(max_request_bytes),
-            "safe_request_bytes": int(max_request_bytes * self.safety_margin),
+            "transmit_max_request_bytes": self.transmit_max_request_bytes,
+            "target_request_bytes": self._target_request_bytes(max_request_bytes),
             "request_limit_source": limit_source,
-            "safety_margin": self.safety_margin,
             "supported_parameters": supported_parameters,
             "providers": providers,
             "discovery_errors": discovery_errors,
@@ -187,17 +198,16 @@ class OpenRouterImageEngine:
         }
 
     def _save_transport_geometry(self, image: Image.Image, directory: Path) -> tuple[Path, str]:
-        preferred = self.transport_format
-        if preferred == "webp":
-            path = directory / "geometry-input.webp"
-            try:
-                image.save(path, format="WEBP", lossless=True, quality=100, method=6, exact=True)
-                return path, "webp-lossless"
-            except Exception:
-                pass
-        path = directory / "geometry-input.png"
-        image.save(path, format="PNG", optimize=True, compress_level=9)
-        return path, "png-lossless"
+        path = directory / "geometry-input.webp"
+        image.save(
+            path,
+            format="WEBP",
+            lossless=False,
+            quality=self.transport_quality,
+            method=6,
+            exact=True,
+        )
+        return path, f"webp-q{self.transport_quality}"
 
     @staticmethod
     def _save_transport_mask(mask: Image.Image, directory: Path) -> Path:
@@ -215,18 +225,15 @@ class OpenRouterImageEngine:
         width: int,
         height: int,
         forced_max_request_bytes: int | None = None,
+        forced_target_request_bytes: int | None = None,
     ) -> dict:
         output_dir.mkdir(parents=True, exist_ok=True)
         capabilities = self.discover_capabilities()
-        if forced_max_request_bytes:
-            capped = self._effective_limit(forced_max_request_bytes)
-            capabilities["max_request_bytes"] = capped
-            capabilities["safe_request_bytes"] = int(capped * self.safety_margin)
-            capabilities["request_limit_source"] = "forced_or_observed_limit_capped"
-        safe_request_bytes = min(
-            int(capabilities["safe_request_bytes"]),
-            int(self.gateway_hard_max_request_bytes * self.safety_margin),
-        )
+        gateway_limit = self._effective_gateway_limit(forced_max_request_bytes)
+        target_request_bytes = self._target_request_bytes(gateway_limit)
+        if forced_target_request_bytes:
+            target_request_bytes = min(target_request_bytes, int(forced_target_request_bytes))
+        target_request_bytes = min(target_request_bytes, self.transmit_max_request_bytes)
 
         with Image.open(geometry_image) as source:
             geometry_master = ImageOps.exif_transpose(source).convert("RGBA")
@@ -245,13 +252,12 @@ class OpenRouterImageEngine:
             scale = min(scale, math.sqrt(self.max_input_pixels / float(original_size[0] * original_size[1])))
 
         request_body = b""
-        final_payload: dict | None = None
         geometry_path: Path | None = None
         mask_path: Path | None = None
         encoding = ""
         attempt = 0
 
-        while attempt < 18:
+        while attempt < 20:
             attempt += 1
             target_width = max(64, int(round(original_size[0] * scale)))
             target_height = max(64, int(round(original_size[1] * scale)))
@@ -267,35 +273,44 @@ class OpenRouterImageEngine:
             transport_mask = transport_mask.point(lambda value: 255 if value >= 128 else 0, mode="L")
             geometry_path, encoding = self._save_transport_geometry(transport_geometry, output_dir)
             mask_path = self._save_transport_mask(transport_mask, output_dir)
-            final_payload = self._build_payload(
+            payload = self._build_payload(
                 prompt=prompt,
                 geometry_image=geometry_path,
                 outpaint_mask=mask_path,
                 width=width,
                 height=height,
             )
-            request_body = self._request_bytes(final_payload)
-            if len(request_body) <= safe_request_bytes:
+            request_body = self._request_bytes(payload)
+            if len(request_body) <= target_request_bytes:
                 break
 
-            ratio = math.sqrt(safe_request_bytes / float(len(request_body))) * 0.88
-            scale *= min(0.88, max(0.20, ratio))
+            ratio = math.sqrt(target_request_bytes / float(len(request_body))) * 0.84
+            scale *= min(0.84, max(0.18, ratio))
             if min(target_size) <= 64:
                 raise AIEngineError(
-                    "Unable to fit generation references into the OpenRouter request limit",
-                    details={"safe_request_bytes": safe_request_bytes, "request_body_bytes": len(request_body)},
+                    "Unable to fit generation references into the OpenRouter transport limit",
+                    details={
+                        "target_request_bytes": target_request_bytes,
+                        "request_body_bytes": len(request_body),
+                    },
                 )
         else:
             raise AIEngineError(
-                "Unable to prepare OpenRouter transport images after 18 attempts",
-                details={"safe_request_bytes": safe_request_bytes, "request_body_bytes": len(request_body)},
+                "Unable to prepare OpenRouter transport images after 20 attempts",
+                details={
+                    "target_request_bytes": target_request_bytes,
+                    "request_body_bytes": len(request_body),
+                },
             )
 
-        assert final_payload is not None and geometry_path is not None and mask_path is not None
-        if len(request_body) > safe_request_bytes:
+        assert geometry_path is not None and mask_path is not None
+        if len(request_body) > target_request_bytes:
             raise AIEngineError(
                 "Transport preflight rejected an oversized request before network transmission",
-                details={"safe_request_bytes": safe_request_bytes, "request_body_bytes": len(request_body)},
+                details={
+                    "target_request_bytes": target_request_bytes,
+                    "request_body_bytes": len(request_body),
+                },
             )
 
         with Image.open(geometry_path) as transport_image:
@@ -316,9 +331,9 @@ class OpenRouterImageEngine:
             "geometry_bytes": geometry_path.stat().st_size,
             "mask_bytes": mask_path.stat().st_size,
             "request_body_bytes": len(request_body),
-            "max_request_bytes": capabilities["max_request_bytes"],
-            "safe_request_bytes": safe_request_bytes,
-            "gateway_hard_max_request_bytes": self.gateway_hard_max_request_bytes,
+            "max_request_bytes": gateway_limit,
+            "transmit_max_request_bytes": self.transmit_max_request_bytes,
+            "target_request_bytes": target_request_bytes,
             "request_limit_source": capabilities["request_limit_source"],
             "resized_for_provider": transport_size != original_size,
             "scale": round(transport_size[0] / float(original_size[0]), 6),
@@ -341,6 +356,38 @@ class OpenRouterImageEngine:
         )
         return payload, self._request_bytes(payload)
 
+    def _prepare_http_request(self, request_body: bytes) -> requests.PreparedRequest:
+        headers = dict(self.headers)
+        headers["X-Marins-Request-Bytes"] = str(len(request_body))
+        request = requests.Request("POST", self.endpoint, headers=headers, data=request_body)
+        prepared_request = request.prepare()
+        body = prepared_request.body
+        if isinstance(body, str):
+            body_bytes = body.encode("utf-8")
+        elif isinstance(body, bytes):
+            body_bytes = body
+        else:
+            raise AIEngineError("Prepared OpenRouter request body is not deterministic")
+        content_length = int(prepared_request.headers.get("Content-Length", "0") or 0)
+        if content_length != len(body_bytes) or len(body_bytes) != len(request_body):
+            raise AIEngineError(
+                "Prepared HTTP request size does not match transport preflight",
+                details={
+                    "preflight_bytes": len(request_body),
+                    "prepared_body_bytes": len(body_bytes),
+                    "content_length": content_length,
+                },
+            )
+        if content_length > self.transmit_max_request_bytes:
+            raise AIEngineError(
+                "Prepared HTTP request exceeds the Marins transmit ceiling",
+                details={
+                    "content_length": content_length,
+                    "transmit_max_request_bytes": self.transmit_max_request_bytes,
+                },
+            )
+        return prepared_request
+
     def _hard_preflight(
         self,
         *,
@@ -351,15 +398,19 @@ class OpenRouterImageEngine:
         width: int,
         height: int,
         prepared: dict,
-    ) -> tuple[dict, dict, bytes]:
+        target_request_bytes: int | None = None,
+    ) -> tuple[dict, dict, bytes, requests.PreparedRequest]:
         payload, request_body = self._prepared_payload(
             prompt=prompt,
             prepared_input=prepared,
             width=width,
             height=height,
         )
-        hard_safe = int(self.gateway_hard_max_request_bytes * self.safety_margin)
-        if len(request_body) > hard_safe:
+        target = min(
+            int(target_request_bytes or self.transmit_max_request_bytes),
+            self.transmit_max_request_bytes,
+        )
+        if len(request_body) > target:
             prepared = self.prepare_environment_inputs(
                 prompt=prompt,
                 geometry_image=geometry_image,
@@ -367,7 +418,7 @@ class OpenRouterImageEngine:
                 output_dir=transport_dir,
                 width=width,
                 height=height,
-                forced_max_request_bytes=self.gateway_hard_max_request_bytes,
+                forced_target_request_bytes=target,
             )
             payload, request_body = self._prepared_payload(
                 prompt=prompt,
@@ -375,16 +426,29 @@ class OpenRouterImageEngine:
                 width=width,
                 height=height,
             )
-        if len(request_body) > hard_safe:
+        if len(request_body) > target:
             raise AIEngineError(
                 "Hard preflight blocked an oversized OpenRouter request",
                 details={
                     "transport": prepared,
                     "request_body_bytes": len(request_body),
-                    "hard_safe_request_bytes": hard_safe,
+                    "target_request_bytes": target,
                 },
             )
-        return prepared, payload, request_body
+        prepared_request = self._prepare_http_request(request_body)
+        prepared["prepared_content_length"] = int(prepared_request.headers["Content-Length"])
+        return prepared, payload, request_body, prepared_request
+
+    def _send_prepared(self, prepared_request: requests.PreparedRequest) -> requests.Response:
+        session = requests.Session()
+        try:
+            return session.send(
+                prepared_request,
+                timeout=self.timeout,
+                allow_redirects=False,
+            )
+        finally:
+            session.close()
 
     def generate_environment(
         self,
@@ -410,7 +474,7 @@ class OpenRouterImageEngine:
             width=width,
             height=height,
         )
-        prepared, payload, request_body = self._hard_preflight(
+        prepared, payload, request_body, prepared_request = self._hard_preflight(
             prompt=prompt,
             geometry_image=geometry_image,
             outpaint_mask=outpaint_mask,
@@ -418,16 +482,21 @@ class OpenRouterImageEngine:
             width=width,
             height=height,
             prepared=prepared,
+            target_request_bytes=self.transmit_max_request_bytes,
         )
 
         started = time.time()
-        response = requests.post(self.endpoint, headers=self.headers, data=request_body, timeout=self.timeout)
+        response = self._send_prepared(prepared_request)
         retry_count = 0
 
         if response.status_code == 413:
             retry_count = 1
             observed_limit = self._extract_request_limit(response.text) or self.gateway_hard_max_request_bytes
-            self._learned_max_request_bytes = self._effective_limit(observed_limit)
+            self._learned_max_request_bytes = self._effective_gateway_limit(observed_limit)
+            emergency_target = min(
+                self.emergency_retry_max_request_bytes,
+                int(self._learned_max_request_bytes * 0.40),
+            )
             prepared = self.prepare_environment_inputs(
                 prompt=prompt,
                 geometry_image=geometry_image,
@@ -436,8 +505,9 @@ class OpenRouterImageEngine:
                 width=width,
                 height=height,
                 forced_max_request_bytes=self._learned_max_request_bytes,
+                forced_target_request_bytes=emergency_target,
             )
-            prepared, payload, request_body = self._hard_preflight(
+            prepared, payload, request_body, prepared_request = self._hard_preflight(
                 prompt=prompt,
                 geometry_image=geometry_image,
                 outpaint_mask=outpaint_mask,
@@ -445,16 +515,27 @@ class OpenRouterImageEngine:
                 width=width,
                 height=height,
                 prepared=prepared,
+                target_request_bytes=emergency_target,
             )
-            response = requests.post(self.endpoint, headers=self.headers, data=request_body, timeout=self.timeout)
+            response = self._send_prepared(prepared_request)
 
         elapsed = round(time.time() - started, 3)
+        if 300 <= response.status_code < 400:
+            raise AIEngineError(
+                f"OpenRouter returned unexpected redirect {response.status_code}",
+                details={
+                    "location": response.headers.get("Location"),
+                    "transport": prepared,
+                    "request_body_bytes": len(request_body),
+                },
+            )
         if response.status_code >= 400:
             raise AIEngineError(
                 f"OpenRouter {response.status_code}: {response.text[:2000]}",
                 details={
                     "transport": prepared,
                     "request_body_bytes": len(request_body),
+                    "prepared_content_length": prepared.get("prepared_content_length"),
                     "retry_count": retry_count,
                     "transport_engine_version": self.transport_engine_version,
                 },
@@ -492,6 +573,7 @@ class OpenRouterImageEngine:
             "usage": data.get("usage") or {},
             "request": {key: value for key, value in payload.items() if key != "input_references"},
             "request_body_bytes": len(request_body),
+            "prepared_content_length": prepared.get("prepared_content_length"),
             "retry_count": retry_count,
             "transport": prepared,
         }
