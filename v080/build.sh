@@ -33,8 +33,13 @@ rm -rf .test-data
 python - <<'PY'
 from app.ai_engine import OpenRouterImageEngine
 engine = OpenRouterImageEngine()
-assert OpenRouterImageEngine.transport_engine_version == "2.2.0"
+assert OpenRouterImageEngine.transport_engine_version == "2.3.0"
 assert engine.transmit_max_request_bytes <= 32 * 1024 * 1024
-print(f"Transport engine {OpenRouterImageEngine.transport_engine_version}; transmit ceiling {engine.transmit_max_request_bytes} bytes")
+assert OpenRouterImageEngine._select_provider_size(8064, 6048) == (1536, 1024)
+print(
+    f"Transport engine {OpenRouterImageEngine.transport_engine_version}; "
+    f"transmit ceiling {engine.transmit_max_request_bytes} bytes; "
+    "8064x6048 provider canvas 1536x1024"
+)
 PY
-echo "Marins Facade v0.8.0 compact unified-grid UI build passed"
+echo "Marins Facade v0.8.0 provider-native output build passed"
