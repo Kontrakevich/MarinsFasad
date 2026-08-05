@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="/tmp/marins-facade-v080.pid"
 LOG_FILE="/tmp/marins-facade-v080.log"
 HEALTH_FILE="/tmp/marins-facade-v080-health.json"
-EXPECTED_TRANSPORT_ENGINE="2.1.0"
+EXPECTED_TRANSPORT_ENGINE="2.2.0"
 
 if [ -f "$PID_FILE" ]; then
   OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
@@ -30,10 +30,14 @@ python - "$EXPECTED_TRANSPORT_ENGINE" <<'PY'
 import sys
 from app.ai_engine import OpenRouterImageEngine
 expected = sys.argv[1]
+engine = OpenRouterImageEngine()
 actual = OpenRouterImageEngine.transport_engine_version
 if actual != expected:
     raise SystemExit(f"Transport engine mismatch: expected {expected}, got {actual}")
+if engine.transmit_max_request_bytes > 32 * 1024 * 1024:
+    raise SystemExit(f"Unsafe transmit ceiling: {engine.transmit_max_request_bytes}")
 print(f"Transport engine {actual} verified")
+print(f"OpenRouter transmit ceiling: {engine.transmit_max_request_bytes} bytes")
 PY
 
 : > "$LOG_FILE"
