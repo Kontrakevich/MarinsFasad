@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .event_store import EventStore
+
 
 class ProjectEngine:
     def __init__(self, root: Path):
@@ -23,37 +25,50 @@ class ProjectEngine:
             "name": name.strip() or project_id,
             "version": "0.8.0-dev",
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "pipeline": {
-                "source": "ready",
-                "geometry": "locked",
-                "environment": "locked",
-                "final": "locked",
-                "branding": "locked"
-            },
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "pipeline": {"source": "ready", "geometry": "locked", "environment": "locked", "final": "locked", "branding": "locked"},
             "assets": {},
             "comments": [],
-            "quality": {}
+            "quality": {},
+            "diagnostics": [],
+            "active_stage": "source",
         }
         self.write(project_id, state)
-        return state
+        self.events(project_id).append("ProjectCreated", {"name": state["name"]})
+        return self.read(project_id)
 
     def list(self) -> list[dict]:
         output = []
         for path in sorted(self.root.glob("*/project.json")):
-            try: output.append(json.loads(path.read_text("utf-8")))
-            except Exception: continue
+            try:
+                output.append(json.loads(path.read_text("utf-8")))
+            except Exception:
+                continue
         return output
 
     def read(self, project_id: str) -> dict:
-        return json.loads((self.root / project_id / "project.json").read_text("utf-8"))
+        state = json.loads((self.path(project_id) / "project.json").read_text("utf-8"))
+        state["event_count"] = len(self.events(project_id).list())
+        return state
 
     def write(self, project_id: str, state: dict) -> None:
-        path = self.root / project_id / "project.json"
+        state["updated_at"] = datetime.now(timezone.utc).isoformat()
+        path = self.path(project_id) / "project.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(state, ensure_ascii=False, indent=2), "utf-8")
 
+    def record(self, project_id: str, event_type: str, payload: dict | None = None, *, actor: str = "user") -> dict:
+        return self.events(project_id).append(event_type, payload, actor=actor)
+
+    def history(self, project_id: str, limit: int = 100) -> list[dict]:
+        return self.events(project_id).recent(limit)
+
+    def events(self, project_id: str) -> EventStore:
+        return EventStore(self.path(project_id))
+
     def path(self, project_id: str) -> Path:
         path = (self.root / project_id).resolve()
-        if self.root.resolve() not in path.parents:
+        root = self.root.resolve()
+        if path != root and root not in path.parents:
             raise ValueError("Unsafe project path")
         return path
