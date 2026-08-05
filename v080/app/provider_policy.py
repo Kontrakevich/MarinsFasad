@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,86 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
     def _system_prompt_sha256() -> str:
         return hashlib.sha256(ENVIRONMENT_SYSTEM_PROMPT.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _project_root_from_geometry(geometry_image: Path) -> Path | None:
+        resolved = geometry_image.resolve()
+        for parent in resolved.parents:
+            if (parent / "project.json").is_file():
+                return parent
+        return None
+
+    def _approval_contract(
+        self,
+        geometry_image: Path,
+        outpaint_mask: Path,
+    ) -> dict[str, Any]:
+        project_root = self._project_root_from_geometry(geometry_image)
+        if project_root is None:
+            # Unit tests and standalone engine calls may use temporary files.
+            return {
+                "approval_verified": False,
+                "approval_source": "standalone-engine-call",
+            }
+
+        try:
+            state = json.loads((project_root / "project.json").read_text("utf-8"))
+        except Exception as exc:
+            raise AIEngineError(
+                "Generation cancelled before provider call: project approval state is unreadable",
+                details={
+                    "provider_call_made": False,
+                    "credits_spent": False,
+                    "reason": "approval_state_unreadable",
+                    "exception": type(exc).__name__,
+                },
+            ) from exc
+
+        geometry_status = (state.get("geometry") or {}).get("status")
+        pipeline_status = (state.get("pipeline") or {}).get("geometry")
+        assets = state.get("assets") or {}
+        expected_geometry_rel = assets.get("geometry_candidate")
+        expected_mask_rel = assets.get("geometry_outpaint_mask")
+        expected_geometry = (
+            (project_root / expected_geometry_rel).resolve()
+            if expected_geometry_rel
+            else None
+        )
+        expected_mask = (
+            (project_root / expected_mask_rel).resolve()
+            if expected_mask_rel
+            else None
+        )
+
+        verified = (
+            geometry_status == "approved"
+            and pipeline_status == "approved"
+            and expected_geometry == geometry_image.resolve()
+            and expected_mask == outpaint_mask.resolve()
+        )
+        if not verified:
+            raise AIEngineError(
+                "Generation cancelled before provider call: corrected geometry and mask are not the exact approved project assets",
+                details={
+                    "provider_call_made": False,
+                    "credits_spent": False,
+                    "reason": "geometry_not_approved",
+                    "geometry_status": geometry_status,
+                    "pipeline_status": pipeline_status,
+                    "expected_geometry": str(expected_geometry) if expected_geometry else None,
+                    "received_geometry": str(geometry_image.resolve()),
+                    "expected_mask": str(expected_mask) if expected_mask else None,
+                    "received_mask": str(outpaint_mask.resolve()),
+                },
+            )
+
+        return {
+            "approval_verified": True,
+            "approval_source": "project.json",
+            "project_id": state.get("id"),
+            "geometry_status": geometry_status,
+            "pipeline_status": pipeline_status,
+        }
+
     def _build_payload(
         self,
         *,
@@ -116,6 +197,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 details={"provider_call_made": False, "credits_spent": False},
             )
 
+        approval = self._approval_contract(geometry_image, outpaint_mask)
         mask_stats = self._mask_statistics(outpaint_mask)
         required_pixels = max(
             self.minimum_editable_pixels,
@@ -126,6 +208,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 "Generation cancelled before provider call: the outpaint mask is empty. "
                 "Reapply Perspective Grid so transparent areas are visible around the corrected image.",
                 details={
+                    **approval,
                     **mask_stats,
                     "required_editable_pixels": required_pixels,
                     "provider_call_made": False,
@@ -145,6 +228,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             forced_target_request_bytes=forced_target_request_bytes,
             supported_sizes=supported_sizes,
         )
+        prepared.update(approval)
         prepared.update(mask_stats)
         prepared.update(
             {
