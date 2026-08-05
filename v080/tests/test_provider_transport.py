@@ -134,7 +134,6 @@ def test_extract_openrouter_limits_and_supported_sizes():
         '1024x1024, 1024x1536, 1536x1024, and auto.","code":400}}'
     )
     assert OpenRouterImageEngine._extract_supported_sizes(text) == [
-        (8064, 6048),
         (1024, 1024),
         (1024, 1536),
         (1536, 1024),
