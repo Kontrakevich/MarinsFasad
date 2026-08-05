@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 from PIL import Image, ImageChops, ImageOps
 
 from . import ai_engine as _engine_module
+from .system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
 
 
 _BaseOpenRouterImageEngine = _engine_module.OpenRouterImageEngine
@@ -51,6 +53,18 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             "editable_ratio": editable_pixels / float(max(1, total_pixels)),
         }
 
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _system_prompt_sha256() -> str:
+        return hashlib.sha256(ENVIRONMENT_SYSTEM_PROMPT.encode("utf-8")).hexdigest()
+
     def _build_payload(
         self,
         *,
@@ -59,20 +73,14 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         outpaint_mask: Path,
         provider_size: tuple[int, int],
     ) -> dict:
-        execution_contract = (
-            "\n\nSTRICT REFERENCE CONTRACT:\n"
-            "Reference image 1 is the approved corrected architecture. Preserve every "
-            "visible opaque architectural pixel, facade proportion, window, floor, edge, "
-            "camera direction and perspective.\n"
-            "Reference image 2 is a binary edit map. WHITE pixels are mandatory generation "
-            "areas. BLACK pixels are protected architecture. Transparent pixels in reference "
-            "image 1 are also mandatory generation areas.\n"
-            "Generate continuous photorealistic surroundings in every white or transparent "
-            "area. Do not return the input image unchanged. Do not leave black, transparent, "
-            "blank, checkerboard or unfilled pixels."
+        compiled_prompt = (
+            f"SYSTEM PROMPT — {PROMPT_CONTRACT_VERSION}\n"
+            f"{ENVIRONMENT_SYSTEM_PROMPT}\n\n"
+            "PROJECT EXECUTION PROMPT\n"
+            f"{prompt.strip()}"
         )
         return super()._build_payload(
-            prompt=prompt + execution_contract,
+            prompt=compiled_prompt,
             geometry_image=geometry_image,
             outpaint_mask=outpaint_mask,
             provider_size=provider_size,
@@ -91,6 +99,19 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         forced_target_request_bytes: int | None = None,
         supported_sizes=None,
     ) -> dict:
+        geometry_image = Path(geometry_image)
+        outpaint_mask = Path(outpaint_mask)
+        if not geometry_image.is_file():
+            raise AIEngineError(
+                "Approved geometry file is missing; provider call cancelled",
+                details={"provider_call_made": False, "credits_spent": False},
+            )
+        if not outpaint_mask.is_file():
+            raise AIEngineError(
+                "Approved outpaint mask is missing; provider call cancelled",
+                details={"provider_call_made": False, "credits_spent": False},
+            )
+
         mask_stats = self._mask_statistics(outpaint_mask)
         required_pixels = max(
             self.minimum_editable_pixels,
@@ -121,8 +142,18 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             supported_sizes=supported_sizes,
         )
         prepared.update(mask_stats)
-        prepared["required_editable_pixels"] = required_pixels
-        prepared["mask_policy"] = "white-generate-black-preserve"
+        prepared.update(
+            {
+                "required_editable_pixels": required_pixels,
+                "mask_policy": "white-generate-black-preserve",
+                "source_contract": "corrected-approved-geometry",
+                "approved_geometry_sha256": self._file_sha256(geometry_image),
+                "approved_mask_sha256": self._file_sha256(outpaint_mask),
+                "system_prompt_contract": PROMPT_CONTRACT_VERSION,
+                "system_prompt_sha256": self._system_prompt_sha256(),
+                "system_prompt_in_request": True,
+            }
+        )
         return prepared
 
     def _promote_provider_output(
@@ -172,6 +203,8 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 "generated_changed_pixels": changed_pixels,
                 "generated_change_ratio": round(change_ratio, 6),
                 "meaningful_generation": change_ratio >= self.minimum_generated_change_ratio,
+                "system_prompt_contract": PROMPT_CONTRACT_VERSION,
+                "approved_geometry_sha256": prepared.get("approved_geometry_sha256"),
             }
         )
 
