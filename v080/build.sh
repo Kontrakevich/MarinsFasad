@@ -13,7 +13,16 @@ find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$ROOT" -type f -name '*.pyc' -delete
 python -m pip install -r requirements.txt
 python -m compileall -f app
-node --check app/web/app-v080.js
+
+# Node.js is optional in the Codespaces runtime. Run the frontend syntax check
+# when available, but do not block the Python application build when absent.
+if command -v node >/dev/null 2>&1; then
+  node --check app/web/app-v080.js
+  echo "Frontend JavaScript syntax check passed"
+else
+  echo "Node.js not found; skipping optional frontend JavaScript syntax check"
+fi
+
 rm -rf .test-data
 MARINS_DATA_ROOT="$ROOT/.test-data/projects" pytest -q
 rm -rf .test-data
