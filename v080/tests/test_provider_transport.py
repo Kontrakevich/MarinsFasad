@@ -17,6 +17,12 @@ def make_mask(path: Path, size=(1200, 900)):
     image.save(path, format="PNG")
 
 
+def test_provider_size_selection_matches_master_orientation():
+    assert OpenRouterImageEngine._select_provider_size(8064, 6048) == (1536, 1024)
+    assert OpenRouterImageEngine._select_provider_size(6048, 8064) == (1024, 1536)
+    assert OpenRouterImageEngine._select_provider_size(4096, 4096) == (1024, 1024)
+
+
 def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     geometry = tmp_path / "geometry.png"
     mask = tmp_path / "mask.png"
@@ -40,6 +46,7 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
         "target_request_bytes": engine.transmit_max_request_bytes,
         "request_limit_source": "test",
         "supported_parameters": {},
+        "supported_output_sizes": ["1024x1024", "1024x1536", "1536x1024"],
         "providers": [],
         "discovery_errors": [],
     })
@@ -53,6 +60,7 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
         height=source_size[1],
     )
 
+    assert result["provider_output_size"] == "1536x1024"
     assert result["request_body_bytes"] <= result["target_request_bytes"]
     assert result["request_body_bytes"] <= engine.transmit_max_request_bytes
     assert result["resized_for_provider"] is True
@@ -67,6 +75,47 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
 
     assert geometry_size == mask_size
     assert geometry_size == (result["transport_width"], result["transport_height"])
+    assert 0 < result["content_box_normalized"]["width"] <= 1
+    assert 0 < result["content_box_normalized"]["height"] <= 1
+
+
+def test_provider_output_is_remapped_and_geometry_is_preserved(tmp_path):
+    geometry = tmp_path / "geometry.png"
+    mask = tmp_path / "mask.png"
+    provider = tmp_path / "provider.png"
+
+    geometry_image = Image.new("RGBA", (8, 6), (10, 20, 30, 255))
+    geometry_image.save(geometry, format="PNG")
+    mask_image = Image.new("L", (8, 6), 0)
+    mask_image.paste(255, (0, 0, 2, 6))
+    mask_image.save(mask, format="PNG")
+    Image.new("RGB", (12, 8), (200, 100, 50)).save(provider, format="PNG")
+
+    prepared = {
+        "content_box_normalized": {
+            "x": 1 / 12,
+            "y": 0,
+            "width": 10 / 12,
+            "height": 1,
+        }
+    }
+    result = OpenRouterImageEngine()._promote_provider_output(
+        provider_output=provider,
+        geometry_image=geometry,
+        outpaint_mask=mask,
+        prepared=prepared,
+        output_dir=tmp_path,
+        width=8,
+        height=6,
+    )
+
+    with Image.open(result["candidate"]) as candidate:
+        assert candidate.size == (8, 6)
+        assert candidate.getpixel((3, 3)) == (10, 20, 30)
+        assert candidate.getpixel((0, 3)) == (200, 100, 50)
+
+    assert result["remapped_to_master"] is True
+    assert result["approved_geometry_preserved"] is True
 
 
 def test_prepared_request_content_length_is_exact():
@@ -75,13 +124,24 @@ def test_prepared_request_content_length_is_exact():
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "2.2.0"
+    assert prepared.headers["X-Marins-Transport-Engine"] == "2.3.0"
     assert prepared.headers["X-Marins-Request-Bytes"] == str(len(body))
 
 
-def test_extract_request_limit_from_openrouter_413():
-    text = '{"error":{"message":"Request body of 54580686 bytes exceeds the maximum allowed size of 52428800 bytes","code":413}}'
-    assert OpenRouterImageEngine._extract_request_limit(text) == 52428800
+def test_extract_openrouter_limits_and_supported_sizes():
+    text = (
+        '{"error":{"message":"Invalid size \'8064x6048\'. Supported sizes are '
+        '1024x1024, 1024x1536, 1536x1024, and auto.","code":400}}'
+    )
+    assert OpenRouterImageEngine._extract_supported_sizes(text) == [
+        (8064, 6048),
+        (1024, 1024),
+        (1024, 1536),
+        (1536, 1024),
+    ]
+
+    size_error = '{"error":{"message":"Request body of 54580686 bytes exceeds the maximum allowed size of 52428800 bytes","code":413}}'
+    assert OpenRouterImageEngine._extract_request_limit(size_error) == 52428800
 
 
 def test_environment_limit_cannot_raise_gateway_or_transmit_cap(monkeypatch):
