@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.ai_engine import OpenRouterImageEngine
 from app.main import app
+from app.system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
 
 client = TestClient(app)
 
@@ -13,9 +14,11 @@ def test_health():
     assert payload['version'] == '0.8.0'
     assert payload['runtime'] == 'standalone-v080'
     assert payload['transport_policy'] == 'provider-aware-temporary-copy'
-    assert OpenRouterImageEngine.transport_engine_version == '2.3.0'
+    assert OpenRouterImageEngine.transport_engine_version == '2.4.0'
     assert OpenRouterImageEngine.default_transmit_max_request_bytes == 32 * 1024 * 1024
     assert OpenRouterImageEngine._select_provider_size(8064, 6048) == (1536, 1024)
+    assert ENVIRONMENT_SYSTEM_PROMPT
+    assert PROMPT_CONTRACT_VERSION == 'environment-system-v1.0'
 
 
 def test_project_create_and_list():
