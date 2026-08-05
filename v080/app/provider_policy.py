@@ -73,12 +73,16 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         outpaint_mask: Path,
         provider_size: tuple[int, int],
     ) -> dict:
-        compiled_prompt = (
-            f"SYSTEM PROMPT — {PROMPT_CONTRACT_VERSION}\n"
-            f"{ENVIRONMENT_SYSTEM_PROMPT}\n\n"
-            "PROJECT EXECUTION PROMPT\n"
-            f"{prompt.strip()}"
-        )
+        project_prompt = prompt.strip()
+        if ENVIRONMENT_SYSTEM_PROMPT in project_prompt:
+            compiled_prompt = project_prompt
+        else:
+            compiled_prompt = (
+                f"SYSTEM PROMPT — {PROMPT_CONTRACT_VERSION}\n"
+                f"{ENVIRONMENT_SYSTEM_PROMPT}\n\n"
+                "PROJECT EXECUTION PROMPT\n"
+                f"{project_prompt}"
+            )
         return super()._build_payload(
             prompt=compiled_prompt,
             geometry_image=geometry_image,
