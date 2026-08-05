@@ -17,7 +17,8 @@ class QualityEngine:
             "black_border_ratio": black_ratio,
             "outpaint_complete": black_ratio < 0.002,
         }
-        return {"ok": all([checks["canvas_match"], checks["outpaint_complete"]]), "checks": checks}
+        passed = checks["canvas_match"] and checks["outpaint_complete"]
+        return {"ok": passed, "passed": passed, "checks": checks}
 
     @staticmethod
     def _border_black_ratio(image: Image.Image, threshold: int = 12) -> float:
