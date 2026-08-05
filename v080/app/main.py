@@ -9,6 +9,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .ai_engine import AIEngineError, OpenRouterImageEngine
 from .config import APP_NAME, APP_VERSION, DATA_ROOT, STATIC_ROOT
 from .geometry_engine import GeometryEngine
 from .image_engine import ImageEngine
@@ -22,7 +23,27 @@ images = ImageEngine()
 geometry = GeometryEngine()
 prompts = PromptEngine()
 quality = QualityEngine()
+ai_images = OpenRouterImageEngine()
 app.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")
+
+
+def _compile_prompt(project_id: str, stage: str) -> dict:
+    state = projects.read(project_id)
+    comments = [x["text"] for x in state.get("comments", []) if x.get("stage") == stage]
+    geometry_block = ""
+    if stage == "environment" and state.get("geometry"):
+        geometry_block = (
+            " Use the approved geometry candidate and its transparent outpaint mask. "
+            "Fill every masked pixel with continuous photorealistic surroundings while preserving the exact master canvas. "
+            "Do not crop, reframe, resize, letterbox or alter approved opaque architecture pixels."
+        )
+    context = PromptContext(
+        stage=stage,
+        master_prompt="You are the architectural image execution model inside Marins Facade Control Center.",
+        skill=f"Execute the {stage} stage while preserving all previously approved architecture.{geometry_block}",
+        comments=comments,
+    )
+    return prompts.compile(context, projects.path(project_id))
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -32,7 +53,7 @@ def index() -> HTMLResponse:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "name": APP_NAME, "version": APP_VERSION, "runtime": "standalone-v080"}
+    return {"status": "ok", "name": APP_NAME, "version": APP_VERSION, "runtime": "standalone-v080", "image_provider": "openrouter", "image_model": ai_images.model, "image_configured": bool(ai_images.api_key)}
 
 
 @app.get("/api/projects")
@@ -61,15 +82,7 @@ def get_history(project_id: str, limit: int = 100) -> list[dict]:
 @app.get("/api/projects/{project_id}/diagnostics")
 def get_diagnostics(project_id: str) -> dict:
     state = projects.read(project_id)
-    return {
-        "project_id": project_id,
-        "version": state.get("version"),
-        "pipeline": state.get("pipeline", {}),
-        "master_canvas": state.get("master_canvas"),
-        "geometry": state.get("geometry"),
-        "quality": state.get("quality", {}),
-        "events": projects.history(project_id, 30),
-    }
+    return {"project_id": project_id, "version": state.get("version"), "pipeline": state.get("pipeline", {}), "master_canvas": state.get("master_canvas"), "geometry": state.get("geometry"), "generation": state.get("generation"), "quality": state.get("quality", {}), "events": projects.history(project_id, 30)}
 
 
 @app.post("/api/projects/{project_id}/source")
@@ -90,6 +103,7 @@ async def upload_source(project_id: str, file: UploadFile = File(...)) -> dict:
         state["master_canvas"] = {"width": master["width"], "height": master["height"]}
         state["active_stage"] = "geometry"
         state.pop("geometry", None)
+        state.pop("generation", None)
         projects.write(project_id, state)
         projects.record(project_id, "SourceUploaded", {"filename": file.filename, "width": master["width"], "height": master["height"], "master": state["assets"]["source_master"]})
         return projects.read(project_id)
@@ -108,7 +122,6 @@ def apply_geometry_grid(project_id: str, quad_json: str = Form(...)) -> dict:
         result = geometry.apply(projects.path(project_id) / master_rel, projects.path(project_id), points)
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         raise HTTPException(422, str(exc))
-
     project_dir = projects.path(project_id)
     candidate = Path(result["candidate"])
     mask = Path(result["outpaint_mask"])
@@ -117,13 +130,7 @@ def apply_geometry_grid(project_id: str, quad_json: str = Form(...)) -> dict:
     state["assets"]["geometry_candidate"] = str(candidate.relative_to(project_dir))
     state["assets"]["geometry_preview"] = str(Path(preview["path"]).relative_to(project_dir))
     state["assets"]["geometry_outpaint_mask"] = str(mask.relative_to(project_dir))
-    state["geometry"] = {
-        "quad": points,
-        "transparent_pixels": result["transparent_pixels"],
-        "transparent_ratio": result["transparent_ratio"],
-        "canvas_preserved": result["canvas_preserved"],
-        "status": "review",
-    }
+    state["geometry"] = {"quad": points, "transparent_pixels": result["transparent_pixels"], "transparent_ratio": result["transparent_ratio"], "canvas_preserved": result["canvas_preserved"], "status": "review"}
     state["pipeline"]["geometry"] = "ready"
     state["active_stage"] = "geometry"
     projects.write(project_id, state)
@@ -158,6 +165,61 @@ def revise_geometry(project_id: str, comment: str = Form(...)) -> dict:
         state["geometry"]["status"] = "revision"
     projects.write(project_id, state)
     projects.record(project_id, "GeometryRevisionAdded", entry)
+    return projects.read(project_id)
+
+
+@app.post("/api/projects/{project_id}/environment/generate")
+def generate_environment(project_id: str) -> dict:
+    state = projects.read(project_id)
+    if state.get("pipeline", {}).get("geometry") != "approved":
+        raise HTTPException(409, "Approve geometry before environment generation")
+    project_dir = projects.path(project_id)
+    geometry_rel = state.get("assets", {}).get("geometry_candidate")
+    mask_rel = state.get("assets", {}).get("geometry_outpaint_mask")
+    canvas = state.get("master_canvas") or {}
+    if not geometry_rel or not mask_rel or not canvas:
+        raise HTTPException(409, "Geometry candidate, outpaint mask or master canvas is missing")
+    compiled = _compile_prompt(project_id, "environment")
+    state["pipeline"]["environment"] = "processing"
+    state["active_stage"] = "environment"
+    projects.write(project_id, state)
+    projects.record(project_id, "EnvironmentGenerationStarted", {"model": ai_images.model, "prompt": compiled.get("path")})
+    try:
+        result = ai_images.generate_environment(prompt=compiled["prompt"], geometry_image=project_dir / geometry_rel, outpaint_mask=project_dir / mask_rel, output_dir=project_dir / "images" / "stages" / "environment", width=int(canvas["width"]), height=int(canvas["height"]))
+        candidate = Path(result["candidate"])
+        preview = images.make_preview(candidate, project_dir, name="environment-candidate")
+        report = quality.inspect(project_dir / state["assets"]["source_master"], candidate)
+        if not report.get("passed"):
+            raise AIEngineError(f"Environment candidate failed quality control: {report}")
+        state = projects.read(project_id)
+        state["assets"]["environment_candidate"] = str(candidate.relative_to(project_dir))
+        state["assets"]["environment_preview"] = str(Path(preview["path"]).relative_to(project_dir))
+        state["generation"] = {"stage": "environment", "provider": result["provider"], "model": result["model"], "duration_seconds": result["duration_seconds"], "usage": result.get("usage") or {}, "status": "review"}
+        state.setdefault("quality", {})["environment_candidate"] = report
+        state["pipeline"]["environment"] = "ready"
+        projects.write(project_id, state)
+        projects.record(project_id, "EnvironmentGenerationCompleted", state["generation"])
+        return projects.read(project_id)
+    except AIEngineError as exc:
+        state = projects.read(project_id)
+        state["pipeline"]["environment"] = "error"
+        state["generation"] = {"stage": "environment", "provider": "openrouter", "model": ai_images.model, "status": "error", "error": str(exc)}
+        projects.write(project_id, state)
+        projects.record(project_id, "EnvironmentGenerationFailed", state["generation"])
+        raise HTTPException(502, str(exc))
+
+
+@app.post("/api/projects/{project_id}/environment/approve")
+def approve_environment(project_id: str) -> dict:
+    state = projects.read(project_id)
+    if not state.get("assets", {}).get("environment_candidate"):
+        raise HTTPException(409, "Generate environment candidate before approval")
+    state["pipeline"].update({"environment": "approved", "final": "ready", "branding": "ready"})
+    state["active_stage"] = "branding"
+    if state.get("generation"):
+        state["generation"]["status"] = "approved"
+    projects.write(project_id, state)
+    projects.record(project_id, "EnvironmentApproved", {"asset": state["assets"]["environment_candidate"]})
     return projects.read(project_id)
 
 
@@ -196,21 +258,9 @@ def set_stage_status(project_id: str, stage: str, status: str = Form(...)) -> di
 
 @app.get("/api/projects/{project_id}/prompt/{stage}")
 def compile_prompt(project_id: str, stage: str) -> dict:
+    result = _compile_prompt(project_id, stage)
     state = projects.read(project_id)
-    comments = [x["text"] for x in state.get("comments", []) if x.get("stage") == stage]
-    geometry_block = ""
-    if stage == "environment" and state.get("geometry"):
-        geometry_block = (
-            " Use the approved geometry candidate and its transparent outpaint mask. "
-            "Fill every masked pixel with continuous photorealistic surroundings while preserving the exact master canvas."
-        )
-    context = PromptContext(
-        stage=stage,
-        master_prompt="You are the architectural image execution model inside Marins Facade Control Center.",
-        skill=f"Execute the {stage} stage while preserving all previously approved architecture.{geometry_block}",
-        comments=comments,
-    )
-    result = prompts.compile(context, projects.path(project_id))
+    comments = [x for x in state.get("comments", []) if x.get("stage") == stage]
     projects.record(project_id, "PromptCompiled", {"stage": stage, "comment_count": len(comments), "path": result.get("path")})
     return result
 
