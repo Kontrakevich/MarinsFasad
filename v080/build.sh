@@ -3,7 +3,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-# Source-of-truth UI: compact single-window composition based on v0.7.
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
 cp -f "$ROOT/ui_single_window/app-v080.js" "$ROOT/app/web/app-v080.js"
@@ -14,8 +13,6 @@ find "$ROOT" -type f -name '*.pyc' -delete
 python -m pip install -r requirements.txt
 python -m compileall -f app
 
-# Node.js is optional in the Codespaces runtime. Run the frontend syntax check
-# when available, but do not block the Python application build when absent.
 if command -v node >/dev/null 2>&1; then
   node --check app/web/app-v080.js
   echo "Frontend JavaScript syntax check passed"
@@ -23,9 +20,6 @@ else
   echo "Node.js not found; skipping optional frontend JavaScript syntax check"
 fi
 
-# Always expose the v080 root as the first Python import location. This makes
-# test collection deterministic even when pytest is installed as a user-level
-# console script outside the repository.
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 rm -rf .test-data
 MARINS_DATA_ROOT="$ROOT/.test-data/projects" python -m pytest -q
@@ -33,13 +27,14 @@ rm -rf .test-data
 python - <<'PY'
 from app.ai_engine import OpenRouterImageEngine
 engine = OpenRouterImageEngine()
-assert OpenRouterImageEngine.transport_engine_version == "2.3.0"
+assert OpenRouterImageEngine.transport_engine_version == "2.4.0"
 assert engine.transmit_max_request_bytes <= 32 * 1024 * 1024
 assert OpenRouterImageEngine._select_provider_size(8064, 6048) == (1536, 1024)
+assert engine.minimum_editable_pixels >= 64
 print(
     f"Transport engine {OpenRouterImageEngine.transport_engine_version}; "
     f"transmit ceiling {engine.transmit_max_request_bytes} bytes; "
-    "8064x6048 provider canvas 1536x1024"
+    "empty-mask credit guard active; 8064x6048 provider canvas 1536x1024"
 )
 PY
-echo "Marins Facade v0.8.0 provider-native output build passed"
+echo "Marins Facade v0.8.0 meaningful-generation build passed"
