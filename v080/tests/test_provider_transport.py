@@ -1,8 +1,10 @@
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
-from app.ai_engine import OpenRouterImageEngine
+from app.ai_engine import AIEngineError, OpenRouterImageEngine
+from app.system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
 
 
 def make_geometry(path: Path, size=(1200, 900)):
@@ -64,6 +66,11 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     assert result["request_body_bytes"] <= result["target_request_bytes"]
     assert result["request_body_bytes"] <= engine.transmit_max_request_bytes
     assert result["resized_for_provider"] is True
+    assert result["source_contract"] == "corrected-approved-geometry"
+    assert result["system_prompt_in_request"] is True
+    assert result["system_prompt_contract"] == PROMPT_CONTRACT_VERSION
+    assert result["approved_geometry_sha256"]
+    assert result["approved_mask_sha256"]
     assert geometry.read_bytes() == geometry_before
     assert mask.read_bytes() == mask_before
 
@@ -77,6 +84,48 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     assert geometry_size == (result["transport_width"], result["transport_height"])
     assert 0 < result["content_box_normalized"]["width"] <= 1
     assert 0 < result["content_box_normalized"]["height"] <= 1
+
+
+def test_payload_contains_system_prompt_and_two_approved_references(tmp_path):
+    geometry = tmp_path / "approved-geometry.png"
+    mask = tmp_path / "approved-mask.png"
+    make_geometry(geometry, (320, 240))
+    make_mask(mask, (320, 240))
+
+    payload = OpenRouterImageEngine()._build_payload(
+        prompt="Operator requirement: clear daytime sky.",
+        geometry_image=geometry,
+        outpaint_mask=mask,
+        provider_size=(1536, 1024),
+    )
+
+    assert ENVIRONMENT_SYSTEM_PROMPT in payload["prompt"]
+    assert PROMPT_CONTRACT_VERSION in payload["prompt"]
+    assert "Operator requirement: clear daytime sky." in payload["prompt"]
+    assert len(payload["input_references"]) == 2
+    assert payload["input_references"][0]["image_url"]["url"].startswith("data:image/")
+    assert payload["input_references"][1]["image_url"]["url"].startswith("data:image/")
+
+
+def test_empty_mask_blocks_provider_preflight_before_credits(tmp_path):
+    geometry = tmp_path / "geometry.png"
+    mask = tmp_path / "empty-mask.png"
+    make_geometry(geometry, (320, 240))
+    Image.new("L", (320, 240), 0).save(mask, format="PNG")
+
+    with pytest.raises(AIEngineError) as captured:
+        OpenRouterImageEngine().prepare_environment_inputs(
+            prompt="Generate surroundings.",
+            geometry_image=geometry,
+            outpaint_mask=mask,
+            output_dir=tmp_path / "transport",
+            width=320,
+            height=240,
+        )
+
+    assert captured.value.details["provider_call_made"] is False
+    assert captured.value.details["credits_spent"] is False
+    assert captured.value.details["reason"] == "empty_outpaint_mask"
 
 
 def test_provider_output_is_remapped_and_geometry_is_preserved(tmp_path):
@@ -97,7 +146,8 @@ def test_provider_output_is_remapped_and_geometry_is_preserved(tmp_path):
             "y": 0,
             "width": 10 / 12,
             "height": 1,
-        }
+        },
+        "approved_geometry_sha256": "test",
     }
     result = OpenRouterImageEngine()._promote_provider_output(
         provider_output=provider,
@@ -116,6 +166,7 @@ def test_provider_output_is_remapped_and_geometry_is_preserved(tmp_path):
 
     assert result["remapped_to_master"] is True
     assert result["approved_geometry_preserved"] is True
+    assert result["meaningful_generation"] is True
 
 
 def test_prepared_request_content_length_is_exact():
@@ -124,7 +175,7 @@ def test_prepared_request_content_length_is_exact():
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "2.3.0"
+    assert prepared.headers["X-Marins-Transport-Engine"] == "2.4.0"
     assert prepared.headers["X-Marins-Request-Bytes"] == str(len(body))
 
 
