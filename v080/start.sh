@@ -26,7 +26,9 @@ if ss -ltnp 2>/dev/null | grep -q ':8070 '; then
 fi
 
 cd "$ROOT"
-python - "$EXPECTED_TRANSPORT_ENGINE" <<'PY'
+find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
+find "$ROOT" -type f -name '*.pyc' -delete
+python -B - "$EXPECTED_TRANSPORT_ENGINE" <<'PY'
 import sys
 from app.ai_engine import OpenRouterImageEngine
 expected = sys.argv[1]
@@ -41,7 +43,7 @@ print(f"OpenRouter transmit ceiling: {engine.transmit_max_request_bytes} bytes")
 PY
 
 : > "$LOG_FILE"
-nohup setsid python -m uvicorn app.main:app --host 0.0.0.0 --port 8070 >"$LOG_FILE" 2>&1 </dev/null &
+PYTHONDONTWRITEBYTECODE=1 nohup setsid python -B -m uvicorn app.main:app --host 0.0.0.0 --port 8070 >"$LOG_FILE" 2>&1 </dev/null &
 NEW_PID=$!
 echo "$NEW_PID" > "$PID_FILE"
 
@@ -60,7 +62,7 @@ for _ in $(seq 1 30); do
     exit 1
   fi
   if curl -fsS http://127.0.0.1:8070/api/health >"$HEALTH_FILE" 2>/dev/null; then
-    if python - "$HEALTH_FILE" <<'PY'
+    if python -B - "$HEALTH_FILE" <<'PY'
 import json, sys
 payload = json.load(open(sys.argv[1], encoding='utf-8'))
 ok = (
