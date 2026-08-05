@@ -21,6 +21,7 @@ bash "$ROOT/release/setup_v071.sh"
 rm -rf "$RUNTIME"
 cp -a "$LEGACY" "$RUNTIME"
 python "$ROOT/release/consolidate_v072.py" "$RUNTIME"
+python "$ROOT/release/patch_v072.py" "$RUNTIME"
 
 if [ -d "$BACKUP" ]; then
   mkdir -p "$RUNTIME/data/projects"
