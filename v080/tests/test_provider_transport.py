@@ -32,6 +32,8 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "discover_capabilities", lambda: {
         "provider": "openrouter",
         "model": engine.model,
+        "transport_engine_version": engine.transport_engine_version,
+        "gateway_hard_max_request_bytes": engine.gateway_hard_max_request_bytes,
         "max_request_bytes": 260000,
         "safe_request_bytes": 234000,
         "request_limit_source": "test",
@@ -65,6 +67,15 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     assert geometry_size == (result["transport_width"], result["transport_height"])
 
 
-def test_extract_request_limit():
-    text = "maximum allowed size of 52428800 bytes"
+def test_extract_request_limit_from_openrouter_413():
+    text = '{"error":{"message":"Request body of 62386906 bytes exceeds the maximum allowed size of 52428800 bytes","code":413}}'
     assert OpenRouterImageEngine._extract_request_limit(text) == 52428800
+
+
+def test_environment_limit_cannot_raise_gateway_hard_cap(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_MAX_REQUEST_BYTES", str(100 * 1024 * 1024))
+    engine = OpenRouterImageEngine()
+    assert engine._effective_limit() == 50 * 1024 * 1024
+    capabilities = engine.discover_capabilities()
+    assert capabilities["max_request_bytes"] <= 50 * 1024 * 1024
+    assert capabilities["safe_request_bytes"] < 50 * 1024 * 1024
