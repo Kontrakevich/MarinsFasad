@@ -28,16 +28,16 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     engine = OpenRouterImageEngine()
     engine.max_input_side = 0
     engine.max_input_pixels = 0
-    engine.safety_margin = 0.90
+    engine.transmit_max_request_bytes = 260000
     monkeypatch.setattr(engine, "discover_capabilities", lambda: {
         "provider": "openrouter",
         "model": engine.model,
         "transport_engine_version": engine.transport_engine_version,
         "gateway_hard_max_request_bytes": engine.gateway_hard_max_request_bytes,
-        "max_request_bytes": 260000,
-        "safe_request_bytes": 234000,
+        "max_request_bytes": 52428800,
+        "transmit_max_request_bytes": 260000,
+        "target_request_bytes": 260000,
         "request_limit_source": "test",
-        "safety_margin": 0.90,
         "supported_parameters": {},
         "providers": [],
         "discovery_errors": [],
@@ -52,7 +52,8 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
         height=900,
     )
 
-    assert result["request_body_bytes"] <= result["safe_request_bytes"]
+    assert result["request_body_bytes"] <= result["target_request_bytes"]
+    assert result["request_body_bytes"] <= engine.transmit_max_request_bytes
     assert result["resized_for_provider"] is True
     assert geometry.read_bytes() == geometry_before
     assert mask.read_bytes() == mask_before
@@ -67,15 +68,28 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     assert geometry_size == (result["transport_width"], result["transport_height"])
 
 
+def test_prepared_request_content_length_is_exact():
+    engine = OpenRouterImageEngine()
+    body = b'{"model":"test","prompt":"x"}'
+    prepared = engine._prepare_http_request(body)
+    assert prepared.body == body
+    assert int(prepared.headers["Content-Length"]) == len(body)
+    assert prepared.headers["X-Marins-Transport-Engine"] == "2.2.0"
+    assert prepared.headers["X-Marins-Request-Bytes"] == str(len(body))
+
+
 def test_extract_request_limit_from_openrouter_413():
-    text = '{"error":{"message":"Request body of 62386906 bytes exceeds the maximum allowed size of 52428800 bytes","code":413}}'
+    text = '{"error":{"message":"Request body of 54580686 bytes exceeds the maximum allowed size of 52428800 bytes","code":413}}'
     assert OpenRouterImageEngine._extract_request_limit(text) == 52428800
 
 
-def test_environment_limit_cannot_raise_gateway_hard_cap(monkeypatch):
+def test_environment_limit_cannot_raise_gateway_or_transmit_cap(monkeypatch):
     monkeypatch.setenv("OPENROUTER_MAX_REQUEST_BYTES", str(100 * 1024 * 1024))
+    monkeypatch.setenv("OPENROUTER_TRANSMIT_MAX_BYTES", str(100 * 1024 * 1024))
     engine = OpenRouterImageEngine()
-    assert engine._effective_limit() == 50 * 1024 * 1024
+    assert engine._effective_gateway_limit() == 50 * 1024 * 1024
+    assert engine.transmit_max_request_bytes == 32 * 1024 * 1024
     capabilities = engine.discover_capabilities()
     assert capabilities["max_request_bytes"] <= 50 * 1024 * 1024
-    assert capabilities["safe_request_bytes"] < 50 * 1024 * 1024
+    assert capabilities["transmit_max_request_bytes"] <= 32 * 1024 * 1024
+    assert capabilities["target_request_bytes"] <= 32 * 1024 * 1024
