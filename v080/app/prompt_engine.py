@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,24 +14,68 @@ class PromptContext:
     knowledge: str = ""
     history: list[str] = field(default_factory=list)
     comments: list[str] = field(default_factory=list)
+    approved_geometry_asset: str = ""
+    approved_mask_asset: str = ""
+    contract_version: str = ""
 
 
 class PromptEngine:
     def compile(self, context: PromptContext, project_dir: Path) -> dict:
+        system_prompt = context.master_prompt.strip()
+        system_sha256 = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+
         sections = [
-            ("SYSTEM ROLE", context.master_prompt),
+            ("SYSTEM PROMPT — AUTHORITATIVE", system_prompt),
+            ("PROMPT CONTRACT", context.contract_version or "unversioned"),
             ("CURRENT STAGE", context.stage.upper()),
-            ("SKILL", context.skill or "No stage-specific skill supplied."),
+            (
+                "APPROVED GEOMETRY INPUT",
+                context.approved_geometry_asset
+                or "No approved geometry asset supplied.",
+            ),
+            (
+                "APPROVED OUTPAINT MASK",
+                context.approved_mask_asset
+                or "No approved outpaint mask supplied.",
+            ),
+            ("STAGE SKILL", context.skill or "No stage-specific skill supplied."),
             ("KNOWLEDGE", context.knowledge or "No additional knowledge supplied."),
-            ("VALIDATED HISTORY", "\n".join(f"- {x}" for x in context.history) or "No validated history."),
-            ("OPERATOR COMMENTS — MANDATORY", "\n".join(f"- {x}" for x in context.comments) or "No operator comments."),
-            ("MASTER CANVAS", "Keep exactly the original width, height, aspect ratio and framing. Never crop or downscale production output."),
-            ("OUTPAINT", "Treat transparent areas and border-connected black regions as masks. Replace all of them with continuous photorealistic surroundings. No black wedges or empty pixels may remain."),
+            (
+                "VALIDATED HISTORY",
+                "\n".join(f"- {item}" for item in context.history)
+                or "No validated history.",
+            ),
+            (
+                "OPERATOR COMMENTS — MANDATORY",
+                "\n".join(f"- {item}" for item in context.comments)
+                or "No operator comments.",
+            ),
+            (
+                "EXECUTION",
+                "Use reference image 1 as the corrected and approved geometry. "
+                "Use reference image 2 as the aligned binary edit mask. "
+                "Generate the requested environment only in mandatory edit areas. "
+                "Return a visibly changed and fully filled environment while preserving approved architecture.",
+            ),
         ]
-        prompt = "\n\n".join(f"{title}\n{body.strip()}" for title, body in sections)
+        prompt = "\n\n".join(
+            f"{title}\n{body.strip()}" for title, body in sections
+        )
+
         folder = project_dir / "prompts" / context.stage
         folder.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         path = folder / f"compiled_{stamp}.txt"
         path.write_text(prompt + "\n", "utf-8")
-        return {"prompt": prompt, "file": str(path.relative_to(project_dir))}
+
+        return {
+            "prompt": prompt,
+            "file": str(path.relative_to(project_dir)),
+            "path": str(path.relative_to(project_dir)),
+            "system_prompt": system_prompt,
+            "system_prompt_sha256": system_sha256,
+            "contract_version": context.contract_version,
+            "approved_geometry_asset": context.approved_geometry_asset,
+            "approved_mask_asset": context.approved_mask_asset,
+            "operator_comment_count": len(context.comments),
+        }
