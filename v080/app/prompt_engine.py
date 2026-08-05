@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
+
 
 @dataclass
 class PromptContext:
@@ -21,22 +23,40 @@ class PromptContext:
 
 class PromptEngine:
     def compile(self, context: PromptContext, project_dir: Path) -> dict:
-        system_prompt = context.master_prompt.strip()
+        is_environment = context.stage.lower() == "environment"
+        system_prompt = (
+            ENVIRONMENT_SYSTEM_PROMPT
+            if is_environment
+            else context.master_prompt.strip()
+        )
+        contract_version = (
+            PROMPT_CONTRACT_VERSION
+            if is_environment
+            else (context.contract_version or "unversioned")
+        )
         system_sha256 = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
 
         sections = [
             ("SYSTEM PROMPT — AUTHORITATIVE", system_prompt),
-            ("PROMPT CONTRACT", context.contract_version or "unversioned"),
+            ("PROMPT CONTRACT", contract_version),
             ("CURRENT STAGE", context.stage.upper()),
             (
                 "APPROVED GEOMETRY INPUT",
                 context.approved_geometry_asset
-                or "No approved geometry asset supplied.",
+                or (
+                    "Reference image 1 supplied by the environment pipeline is the corrected and approved geometry."
+                    if is_environment
+                    else "No approved geometry asset supplied."
+                ),
             ),
             (
                 "APPROVED OUTPAINT MASK",
                 context.approved_mask_asset
-                or "No approved outpaint mask supplied.",
+                or (
+                    "Reference image 2 supplied by the environment pipeline is the aligned approved binary outpaint mask."
+                    if is_environment
+                    else "No approved outpaint mask supplied."
+                ),
             ),
             ("STAGE SKILL", context.skill or "No stage-specific skill supplied."),
             ("KNOWLEDGE", context.knowledge or "No additional knowledge supplied."),
@@ -74,7 +94,7 @@ class PromptEngine:
             "path": str(path.relative_to(project_dir)),
             "system_prompt": system_prompt,
             "system_prompt_sha256": system_sha256,
-            "contract_version": context.contract_version,
+            "contract_version": contract_version,
             "approved_geometry_asset": context.approved_geometry_asset,
             "approved_mask_asset": context.approved_mask_asset,
             "operator_comment_count": len(context.comments),
