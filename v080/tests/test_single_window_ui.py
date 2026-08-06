@@ -13,8 +13,26 @@ def test_single_window_workspace_structure():
         'inspector-stage',
         'timeline-list',
         'candidate-list',
+        'split-before-label',
+        'split-after-label',
     ):
         assert f'id="{element_id}"' in html
+
+
+def test_workspace_views_are_stage_specific():
+    html = (ROOT / "ui_single_window" / "index.html").read_text("utf-8")
+    js = (ROOT / "ui_single_window" / "app-v080.js").read_text("utf-8")
+
+    for view in ('original', 'grid', 'result', 'generation', 'split'):
+        assert f'data-view="{view}"' in html
+
+    assert 'data-view="overlay"' not in html
+    assert 'overlay-view' not in html
+    assert "source: ['original']" in js
+    assert "geometry: ['grid', 'result', 'split']" in js
+    assert "environment: ['original', 'result', 'generation', 'split']" in js
+    assert "beforeLabel: 'РЕЗУЛЬТАТ'" in js
+    assert "afterLabel: 'ГЕНЕРАЦИЯ'" in js
 
 
 def test_perspective_grid_is_connected_to_v080_api():
