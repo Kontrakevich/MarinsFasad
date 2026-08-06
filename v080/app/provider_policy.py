@@ -17,12 +17,13 @@ AIEngineError = _engine_module.AIEngineError
 
 
 class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
-    """Marins provider policy for safe, meaningful image generation."""
+    """Provider policy for approved-geometry full-canvas generation."""
 
-    transport_engine_version = "2.4.0"
+    transport_engine_version = "2.5.0"
     minimum_editable_pixels = 64
     minimum_editable_ratio = 0.00001
     minimum_generated_change_ratio = 0.01
+    maximum_unfilled_ratio = 0.01
 
     @staticmethod
     def _extract_supported_sizes(text: str) -> list[tuple[int, int]]:
@@ -81,7 +82,6 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
     ) -> dict[str, Any]:
         project_root = self._project_root_from_geometry(geometry_image)
         if project_root is None:
-            # Unit tests and standalone engine calls may use temporary files.
             return {
                 "approval_verified": False,
                 "approval_source": "standalone-engine-call",
@@ -146,6 +146,39 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             "pipeline_status": pipeline_status,
         }
 
+    @staticmethod
+    def _effective_edit_mask(
+        geometry_image: Path,
+        approved_mask: Path,
+        destination: Path,
+    ) -> Path:
+        with Image.open(geometry_image) as geometry_source:
+            geometry = ImageOps.exif_transpose(geometry_source).convert("RGBA")
+        with Image.open(approved_mask) as mask_source:
+            mask = ImageOps.exif_transpose(mask_source).convert("L")
+
+        if geometry.size != mask.size:
+            raise AIEngineError(
+                "Approved geometry and outpaint mask have different canvas sizes",
+                details={
+                    "provider_call_made": False,
+                    "credits_spent": False,
+                    "reason": "mask_canvas_mismatch",
+                    "geometry_size": geometry.size,
+                    "mask_size": mask.size,
+                },
+            )
+
+        binary_mask = mask.point(lambda value: 255 if value >= 128 else 0, mode="L")
+        transparent_mask = geometry.getchannel("A").point(
+            lambda value: 255 if value == 0 else 0,
+            mode="L",
+        )
+        effective = ImageChops.lighter(binary_mask, transparent_mask)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        effective.save(destination, format="PNG", optimize=False)
+        return destination
+
     def _build_payload(
         self,
         *,
@@ -185,42 +218,48 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         supported_sizes=None,
     ) -> dict:
         geometry_image = Path(geometry_image)
-        outpaint_mask = Path(outpaint_mask)
+        approved_mask = Path(outpaint_mask)
+        output_dir = Path(output_dir)
+
         if not geometry_image.is_file():
             raise AIEngineError(
                 "Approved geometry file is missing; provider call cancelled",
                 details={"provider_call_made": False, "credits_spent": False},
             )
-        if not outpaint_mask.is_file():
+        if not approved_mask.is_file():
             raise AIEngineError(
                 "Approved outpaint mask is missing; provider call cancelled",
                 details={"provider_call_made": False, "credits_spent": False},
             )
 
-        approval = self._approval_contract(geometry_image, outpaint_mask)
-        mask_stats = self._mask_statistics(outpaint_mask)
+        approval = self._approval_contract(geometry_image, approved_mask)
+        effective_mask = self._effective_edit_mask(
+            geometry_image,
+            approved_mask,
+            output_dir / "effective-edit-mask.png",
+        )
+        mask_stats = self._mask_statistics(effective_mask)
         required_pixels = max(
             self.minimum_editable_pixels,
             int(mask_stats["total_pixels"] * self.minimum_editable_ratio),
         )
         if mask_stats["editable_pixels"] < required_pixels:
             raise AIEngineError(
-                "Generation cancelled before provider call: the outpaint mask is empty. "
-                "Reapply Perspective Grid so transparent areas are visible around the corrected image.",
+                "Generation cancelled before provider call: the full-canvas edit mask is empty. Reapply Perspective Grid so transparent areas are present around the corrected image.",
                 details={
                     **approval,
                     **mask_stats,
                     "required_editable_pixels": required_pixels,
                     "provider_call_made": False,
                     "credits_spent": False,
-                    "reason": "empty_outpaint_mask",
+                    "reason": "empty_effective_edit_mask",
                 },
             )
 
         prepared = super().prepare_environment_inputs(
             prompt=prompt,
             geometry_image=geometry_image,
-            outpaint_mask=outpaint_mask,
+            outpaint_mask=effective_mask,
             output_dir=output_dir,
             width=width,
             height=height,
@@ -233,16 +272,38 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         prepared.update(
             {
                 "required_editable_pixels": required_pixels,
-                "mask_policy": "white-generate-black-preserve",
+                "mask_policy": "white-mask-or-transparent-geometry-generate",
                 "source_contract": "corrected-approved-geometry",
+                "approved_geometry_path": str(geometry_image),
+                "approved_mask_path": str(approved_mask),
+                "effective_mask_path": str(effective_mask),
                 "approved_geometry_sha256": self._file_sha256(geometry_image),
-                "approved_mask_sha256": self._file_sha256(outpaint_mask),
+                "approved_mask_sha256": self._file_sha256(approved_mask),
+                "effective_mask_sha256": self._file_sha256(effective_mask),
                 "system_prompt_contract": PROMPT_CONTRACT_VERSION,
                 "system_prompt_sha256": self._system_prompt_sha256(),
                 "system_prompt_in_request": True,
+                "full_canvas_generation": True,
             }
         )
         return prepared
+
+    @staticmethod
+    def _unfilled_statistics(candidate: Image.Image, edit_mask: Image.Image) -> dict[str, Any]:
+        candidate_rgb = candidate.convert("RGB")
+        editable = edit_mask.point(lambda value: 255 if value >= 128 else 0, mode="L")
+        editable_pixels = int(sum(editable.histogram()[128:]))
+
+        luminance = candidate_rgb.convert("L")
+        near_black = luminance.point(lambda value: 255 if value <= 4 else 0, mode="L")
+        black_in_edit = ImageChops.multiply(near_black, editable)
+        black_pixels = int(sum(black_in_edit.histogram()[128:]))
+        unfilled_ratio = black_pixels / float(max(1, editable_pixels))
+        return {
+            "editable_pixels": editable_pixels,
+            "unfilled_editable_pixels": black_pixels,
+            "unfilled_editable_ratio": round(unfilled_ratio, 6),
+        }
 
     def _promote_provider_output(
         self,
@@ -255,10 +316,11 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         width: int,
         height: int,
     ) -> dict:
+        effective_mask = Path(prepared.get("effective_mask_path") or outpaint_mask)
         result = super()._promote_provider_output(
             provider_output=provider_output,
             geometry_image=geometry_image,
-            outpaint_mask=outpaint_mask,
+            outpaint_mask=effective_mask,
             prepared=prepared,
             output_dir=output_dir,
             width=width,
@@ -269,11 +331,18 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             candidate = ImageOps.exif_transpose(candidate_source).convert("RGB")
         with Image.open(geometry_image) as geometry_source:
             geometry = ImageOps.exif_transpose(geometry_source).convert("RGB")
-        with Image.open(outpaint_mask) as mask_source:
+        with Image.open(effective_mask) as mask_source:
             edit_mask = ImageOps.exif_transpose(mask_source).convert("L").point(
                 lambda value: 255 if value >= 128 else 0,
                 mode="L",
             )
+
+        # Ensure a deterministic RGB production asset.
+        ImageOps.exif_transpose(candidate).convert("RGB").save(
+            result["candidate"],
+            format="PNG",
+            optimize=False,
+        )
 
         editable_pixels = int(sum(edit_mask.histogram()[128:]))
         difference = ImageChops.difference(candidate, geometry).convert("L")
@@ -284,22 +353,36 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         changed_in_edit_area = ImageChops.multiply(changed, edit_mask)
         changed_pixels = int(sum(changed_in_edit_area.histogram()[128:]))
         change_ratio = changed_pixels / float(max(1, editable_pixels))
+        unfilled = self._unfilled_statistics(candidate, edit_mask)
 
         result.update(
             {
-                "editable_pixels": editable_pixels,
+                **unfilled,
                 "generated_changed_pixels": changed_pixels,
                 "generated_change_ratio": round(change_ratio, 6),
                 "meaningful_generation": change_ratio >= self.minimum_generated_change_ratio,
                 "system_prompt_contract": PROMPT_CONTRACT_VERSION,
                 "approved_geometry_sha256": prepared.get("approved_geometry_sha256"),
+                "effective_mask_path": str(effective_mask),
+                "full_canvas_generation": True,
             }
         )
 
+        if unfilled["unfilled_editable_ratio"] > self.maximum_unfilled_ratio:
+            raise AIEngineError(
+                "Provider output left black or unfilled pixels in the full-canvas generation area. The candidate was retained only for diagnostics.",
+                details={
+                    "transport": prepared,
+                    "provider_output": str(provider_output),
+                    "candidate": result["candidate"],
+                    **unfilled,
+                    "reason": "unfilled_editable_area",
+                },
+            )
+
         if change_ratio < self.minimum_generated_change_ratio:
             raise AIEngineError(
-                "Provider returned no meaningful visual change in the outpaint area. "
-                "The result was retained for diagnostics but was not promoted as a successful candidate.",
+                "Provider returned no meaningful visual change in the full-canvas generation area. The result was retained for diagnostics but was not promoted.",
                 details={
                     "transport": prepared,
                     "provider_output": str(provider_output),
