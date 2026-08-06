@@ -7,8 +7,8 @@ def test_environment_compiled_prompt_contains_authoritative_system_contract(tmp_
         PromptContext(
             stage="environment",
             master_prompt="generic fallback",
-            skill="Fill the approved outpaint area.",
-            comments=["Use a clear daytime sky."],
+            skill="Regenerate everything.",
+            comments=["Заменить только автомобиль справа на дерево."],
         ),
         tmp_path,
     )
@@ -16,7 +16,9 @@ def test_environment_compiled_prompt_contains_authoritative_system_contract(tmp_
     assert result["system_prompt"] == ENVIRONMENT_SYSTEM_PROMPT
     assert result["contract_version"] == PROMPT_CONTRACT_VERSION
     assert ENVIRONMENT_SYSTEM_PROMPT in result["prompt"]
-    assert "Use a clear daytime sky." in result["prompt"]
-    assert "corrected and approved geometry" in result["prompt"]
+    assert "Заменить только автомобиль справа на дерево." in result["prompt"]
+    assert "immutable approved base" in result["prompt"]
+    assert "selective image editing only" in result["prompt"]
+    assert result["provider_model"] == "google/gemini-2.5-flash-image"
     assert result["system_prompt_sha256"]
     assert (tmp_path / result["file"]).is_file()
