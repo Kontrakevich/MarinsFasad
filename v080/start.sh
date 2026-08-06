@@ -39,7 +39,7 @@ fi
 cd "$ROOT"
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
-cp -f "$ROOT/ui_single_window/app-v080.js" "$ROOT/app/web/app-v080.js"
+cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" > "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
@@ -47,6 +47,7 @@ find "$ROOT" -type f -name '*.pyc' -delete
 python -B - "$EXPECTED_TRANSPORT_ENGINE" "$EXPECTED_PROMPT_CONTRACT" <<'PY'
 import sys
 from app.ai_engine import OpenRouterImageEngine
+from app.main import health
 from app.system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
 
 expected_engine = sys.argv[1]
@@ -65,9 +66,12 @@ if not ENVIRONMENT_SYSTEM_PROMPT:
     raise SystemExit("Environment system prompt is not configured")
 if engine.minimum_editable_pixels < 64:
     raise SystemExit("Empty-mask credit guard is not active")
+if health().get("generation_mode") != "background-job-polling":
+    raise SystemExit("Background generation polling is not active")
 print(f"Transport engine {actual} verified")
 print(f"OpenRouter transmit ceiling: {engine.transmit_max_request_bytes} bytes")
 print(f"System prompt contract: {PROMPT_CONTRACT_VERSION}")
+print("Generation mode: background job + browser polling")
 print("Input contract: approved corrected geometry + full-canvas effective mask")
 print("Editable area: white approved mask OR transparent geometry")
 print("Credit guard: empty effective mask blocks provider call")
@@ -101,6 +105,7 @@ ok = (
     payload.get('runtime') == 'standalone-v080'
     and payload.get('version') == '0.8.0'
     and payload.get('transport_policy') == 'provider-aware-temporary-copy'
+    and payload.get('generation_mode') == 'background-job-polling'
 )
 raise SystemExit(0 if ok else 1)
 PY
@@ -108,6 +113,7 @@ PY
       echo "Marins Facade v0.8.0 standalone started on port 8070 (PID $NEW_PID)"
       echo "Transport engine: $EXPECTED_TRANSPORT_ENGINE"
       echo "Prompt contract: $EXPECTED_PROMPT_CONTRACT"
+      echo "Generation mode: background job + browser polling"
       cat "$HEALTH_FILE"
       exit 0
     fi
