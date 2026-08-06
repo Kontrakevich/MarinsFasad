@@ -11,22 +11,34 @@ from PIL import Image, ImageOps
 class GeometryEngine:
     """Perspective correction on the immutable master canvas.
 
-    The source is never modified. The selected facade plane is rectified in
-    place instead of being stretched over the complete canvas. The whole source
-    is transformed through the same homography, so the unavoidable empty wedges
-    remain transparent and become the explicit outpaint mask.
+    The source is never modified. The whole source is transformed through one
+    homography. Areas for which the corrected image has no visual information
+    remain transparent and are detected automatically by the outpaint stage.
+    No separate project mask is created or approved.
     """
 
     @staticmethod
-    def _ordered_quad(points: list[dict]) -> np.ndarray:
+    def _ordered_quad(points: list[dict], width: int, height: int) -> np.ndarray:
         if len(points) != 4:
-            raise ValueError("Perspective grid requires exactly four points")
-        pts = np.array(
-            [[float(point["x"]), float(point["y"])] for point in points],
-            dtype=np.float32,
-        )
-        if not np.isfinite(pts).all():
-            raise ValueError("Perspective grid contains invalid coordinates")
+            raise ValueError("Нужно указать четыре точки перспективной сетки.")
+
+        normalized: list[list[float]] = []
+        for index, point in enumerate(points, start=1):
+            try:
+                x = float(point["x"])
+                y = float(point["y"])
+            except (KeyError, TypeError, ValueError):
+                raise ValueError(f"Координаты точки {index} переданы неверно.")
+            if not np.isfinite(x) or not np.isfinite(y):
+                raise ValueError(f"Координаты точки {index} должны быть конечными числами.")
+            normalized.append(
+                [
+                    max(0.0, min(float(width - 1), x)),
+                    max(0.0, min(float(height - 1), y)),
+                ]
+            )
+
+        pts = np.array(normalized, dtype=np.float32)
         sums = pts.sum(axis=1)
         diffs = np.diff(pts, axis=1).reshape(-1)
         return np.array(
@@ -86,15 +98,7 @@ class GeometryEngine:
             width, height = oriented.size
             rgba = np.array(oriented)
 
-        src = self._ordered_quad(points)
-        if (
-            (src[:, 0] < 0).any()
-            or (src[:, 0] > width - 1).any()
-            or (src[:, 1] < 0).any()
-            or (src[:, 1] > height - 1).any()
-        ):
-            raise ValueError("Perspective grid must stay inside the master canvas")
-
+        src = self._ordered_quad(points, width, height)
         dst, destination_rect = self._destination_rect(src, width, height)
         matrix = cv2.getPerspectiveTransform(src, dst)
 
@@ -116,8 +120,8 @@ class GeometryEngine:
             borderMode=cv2.BORDER_CONSTANT,
             borderValue=0,
         )
-        mask = np.where(validity < 250, 255, 0).astype(np.uint8)
-        corrected[:, :, 3] = np.where(mask == 255, 0, corrected[:, :, 3]).astype(np.uint8)
+        missing = validity < 250
+        corrected[:, :, 3] = np.where(missing, 0, corrected[:, :, 3]).astype(np.uint8)
 
         target_dir = project_dir / "images" / "stages" / "geometry"
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -128,26 +132,30 @@ class GeometryEngine:
             optimize=False,
         )
 
-        mask_path = target_dir / "outpaint-mask.png"
-        Image.fromarray(mask, "L").save(mask_path, format="PNG", optimize=False)
+        # Remove the obsolete project mask left by earlier builds.
+        (target_dir / "outpaint-mask.png").unlink(missing_ok=True)
 
-        transparent_pixels = int(np.count_nonzero(mask))
-        transparent_ratio = transparent_pixels / float(width * height)
+        missing_pixels = int(np.count_nonzero(missing))
+        missing_ratio = missing_pixels / float(width * height)
+        normalized_points = [
+            {"x": float(point[0]), "y": float(point[1])}
+            for point in src.tolist()
+        ]
         metadata = {
             "source": str(source),
             "candidate": str(candidate),
-            "outpaint_mask": str(mask_path),
             "width": width,
             "height": height,
-            "points": points,
+            "points": normalized_points,
             "destination_rect": destination_rect,
             "matrix": matrix.tolist(),
-            "transparent_pixels": transparent_pixels,
-            "transparent_ratio": round(transparent_ratio, 6),
+            "missing_pixels": missing_pixels,
+            "missing_ratio": round(missing_ratio, 6),
             "canvas_preserved": True,
             "lossless": True,
             "rectification_policy": "in-place-plane-rectification",
-            "generation_ready": transparent_pixels > 0,
+            "outpaint_detection": "automatic-from-candidate-transparency",
+            "outpaint_required": missing_pixels > 0,
         }
         (target_dir / "geometry.json").write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2),
