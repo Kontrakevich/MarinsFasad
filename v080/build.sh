@@ -11,6 +11,18 @@ cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$ROOT" -type f -name '*.pyc' -delete
 python -m pip install -r requirements.txt
+
+python - <<'PY'
+import cv2
+import numpy
+from app.geometry_engine import GeometryEngine
+
+assert cv2.__version__
+assert numpy.__version__
+assert GeometryEngine
+print(f"OpenCV {cv2.__version__} and NumPy {numpy.__version__} verified")
+PY
+
 python -m compileall -f app
 
 if command -v node >/dev/null 2>&1; then
