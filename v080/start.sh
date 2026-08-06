@@ -42,9 +42,11 @@ cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
 sed -i 's/resilient-fullframe-0806/selective-nanobanana-0806/g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
 cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" > "$ROOT/app/web/app-v080.js"
+sed -i 's/Сгенерируйте окружение по всему canvas/Внесите только указанные точечные изменения через Nano Banana/g' "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
 
 grep -q 'selective-nanobanana-0806' "$ROOT/app/web/index.html"
+grep -q 'Внесите только указанные точечные изменения через Nano Banana' "$ROOT/app/web/app-v080.js"
 grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
 grep -q 'background-job-polling' "$ROOT/app/main.py"
 
