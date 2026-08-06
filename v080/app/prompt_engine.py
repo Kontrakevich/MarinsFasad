@@ -41,11 +41,13 @@ class PromptEngine:
                 "Generate the complete output frame from the approved corrected geometry. "
                 "Use the geometry as the structural and compositional reference for the whole image. "
                 "Do not limit generation to transparent, black or formerly masked areas. "
-                "The outpaint mask is supplied only for post-generation quality control and must not restrict the provider output."
+                "The outpaint mask is for post-generation quality control only and must not restrict the provider output."
             )
             mask_description = (
-                context.approved_mask_asset
-                or "The approved mask is retained for quality control only and is not sent as a generation constraint."
+                f"{context.approved_mask_asset}\n"
+                "The outpaint mask is retained for post-generation quality control only and is not sent as a generation constraint."
+                if context.approved_mask_asset
+                else "The approved mask is retained for post-generation quality control only and is not sent as a generation constraint."
             )
             execution = (
                 "Use reference image 1 as the corrected and approved geometry foundation. "
