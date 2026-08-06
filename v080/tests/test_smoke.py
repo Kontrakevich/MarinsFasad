@@ -16,7 +16,7 @@ def test_health():
     assert payload['transport_policy'] == 'provider-aware-temporary-copy'
     assert payload['generation_mode'] == 'background-job-polling'
     assert payload['image_model'] == 'google/gemini-2.5-flash-image'
-    assert OpenRouterImageEngine.transport_engine_version == '2.8.0'
+    assert OpenRouterImageEngine.transport_engine_version == '2.7.2'
     assert OpenRouterImageEngine.required_model == 'google/gemini-2.5-flash-image'
     assert OpenRouterImageEngine.generation_mode == 'selective-edit'
     assert OpenRouterImageEngine.outpaint_qc_blocking is False
