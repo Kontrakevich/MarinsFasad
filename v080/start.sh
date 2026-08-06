@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="/tmp/marins-facade-v080.pid"
 LOG_FILE="/tmp/marins-facade-v080.log"
 HEALTH_FILE="/tmp/marins-facade-v080-health.json"
-EXPECTED_TRANSPORT_ENGINE="2.8.0"
+EXPECTED_TRANSPORT_ENGINE="2.7.2"
 EXPECTED_PROMPT_CONTRACT="environment-system-v1.3"
 EXPECTED_MODEL="google/gemini-2.5-flash-image"
 
@@ -50,7 +50,7 @@ grep -q 'Внесите только указанные точечные изм�
 grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
 grep -q 'background-job-polling' "$ROOT/app/main.py"
 grep -q 'opaque-marker-plus-zoomed-nano-banana-tiles' "$ROOT/app/missing_region_policy.py"
-grep -q 'transport_engine_version = "2.8.0"' "$ROOT/app/runtime_version_policy.py"
+grep -q 'transport_engine_version = "2.7.2"' "$ROOT/app/runtime_version_policy.py"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$ROOT" -type f -name '*.pyc' -delete
