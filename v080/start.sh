@@ -4,10 +4,9 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="/tmp/marins-facade-v080.pid"
 LOG_FILE="/tmp/marins-facade-v080.log"
 HEALTH_FILE="/tmp/marins-facade-v080-health.json"
-EXPECTED_TRANSPORT_ENGINE="2.4.0"
+EXPECTED_TRANSPORT_ENGINE="2.5.0"
+EXPECTED_PROMPT_CONTRACT="environment-system-v1.1"
 
-# A legacy Codespaces configuration used release/start_v060.sh. Remove its
-# stale process marker before taking ownership of the shared application port.
 if [ -f "/tmp/marins-facade-v060.pid" ]; then
   LEGACY_PID="$(cat /tmp/marins-facade-v060.pid 2>/dev/null || true)"
   if [ -n "$LEGACY_PID" ] && kill -0 "$LEGACY_PID" 2>/dev/null; then
@@ -38,10 +37,6 @@ if ss -ltnp 2>/dev/null | grep -q ':8070 '; then
 fi
 
 cd "$ROOT"
-
-# The editable single-window UI is the source of truth. Synchronize it into
-# the FastAPI static runtime on every Codespaces restart so an old generated
-# app/web directory can never reappear.
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
 cp -f "$ROOT/ui_single_window/app-v080.js" "$ROOT/app/web/app-v080.js"
@@ -49,29 +44,33 @@ cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$ROOT" -type f -name '*.pyc' -delete
-python -B - "$EXPECTED_TRANSPORT_ENGINE" <<'PY'
+python -B - "$EXPECTED_TRANSPORT_ENGINE" "$EXPECTED_PROMPT_CONTRACT" <<'PY'
 import sys
 from app.ai_engine import OpenRouterImageEngine
 from app.system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
 
-expected = sys.argv[1]
+expected_engine = sys.argv[1]
+expected_prompt = sys.argv[2]
 engine = OpenRouterImageEngine()
 actual = OpenRouterImageEngine.transport_engine_version
-if actual != expected:
-    raise SystemExit(f"Transport engine mismatch: expected {expected}, got {actual}")
+if actual != expected_engine:
+    raise SystemExit(f"Transport engine mismatch: expected {expected_engine}, got {actual}")
+if PROMPT_CONTRACT_VERSION != expected_prompt:
+    raise SystemExit(f"Prompt contract mismatch: expected {expected_prompt}, got {PROMPT_CONTRACT_VERSION}")
 if engine.transmit_max_request_bytes > 32 * 1024 * 1024:
     raise SystemExit(f"Unsafe transmit ceiling: {engine.transmit_max_request_bytes}")
 if OpenRouterImageEngine._select_provider_size(8064, 6048) != (1536, 1024):
     raise SystemExit("Provider output size policy is not active")
-if not ENVIRONMENT_SYSTEM_PROMPT or not PROMPT_CONTRACT_VERSION:
+if not ENVIRONMENT_SYSTEM_PROMPT:
     raise SystemExit("Environment system prompt is not configured")
 if engine.minimum_editable_pixels < 64:
     raise SystemExit("Empty-mask credit guard is not active")
 print(f"Transport engine {actual} verified")
 print(f"OpenRouter transmit ceiling: {engine.transmit_max_request_bytes} bytes")
 print(f"System prompt contract: {PROMPT_CONTRACT_VERSION}")
-print("Input contract: approved corrected geometry + approved outpaint mask")
-print("Credit guard: empty mask blocks provider call")
+print("Input contract: approved corrected geometry + full-canvas effective mask")
+print("Editable area: white approved mask OR transparent geometry")
+print("Credit guard: empty effective mask blocks provider call")
 print("Provider output policy: 8064x6048 -> 1536x1024 -> master remap")
 PY
 
@@ -108,6 +107,7 @@ PY
     then
       echo "Marins Facade v0.8.0 standalone started on port 8070 (PID $NEW_PID)"
       echo "Transport engine: $EXPECTED_TRANSPORT_ENGINE"
+      echo "Prompt contract: $EXPECTED_PROMPT_CONTRACT"
       cat "$HEALTH_FILE"
       exit 0
     fi
