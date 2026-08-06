@@ -36,6 +36,30 @@ class PromptEngine:
         )
         system_sha256 = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
 
+        if is_environment:
+            stage_skill = (
+                "Generate the complete output frame from the approved corrected geometry. "
+                "Use the geometry as the structural and compositional reference for the whole image. "
+                "Do not limit generation to transparent, black or formerly masked areas. "
+                "The outpaint mask is supplied only for post-generation quality control and must not restrict the provider output."
+            )
+            mask_description = (
+                context.approved_mask_asset
+                or "The approved mask is retained for quality control only and is not sent as a generation constraint."
+            )
+            execution = (
+                "Use reference image 1 as the corrected and approved geometry foundation. "
+                "Regenerate the entire canvas as one coherent photorealistic scene. "
+                "Preserve the corrected architectural structure, perspective, proportions, floor count and window rhythm, "
+                "but create fresh pixels across the complete frame. "
+                "Fill all former transparent or black areas naturally. "
+                "Do not return an unchanged source and do not generate only inside the former mask."
+            )
+        else:
+            stage_skill = context.skill or "No stage-specific skill supplied."
+            mask_description = context.approved_mask_asset or "No approved outpaint mask supplied."
+            execution = "Execute the active stage according to the authoritative system prompt and mandatory operator comments."
+
         sections = [
             ("SYSTEM PROMPT — AUTHORITATIVE", system_prompt),
             ("PROMPT CONTRACT", contract_version),
@@ -49,16 +73,8 @@ class PromptEngine:
                     else "No approved geometry asset supplied."
                 ),
             ),
-            (
-                "APPROVED OUTPAINT MASK",
-                context.approved_mask_asset
-                or (
-                    "Reference image 2 supplied by the environment pipeline is the aligned approved binary outpaint mask."
-                    if is_environment
-                    else "No approved outpaint mask supplied."
-                ),
-            ),
-            ("STAGE SKILL", context.skill or "No stage-specific skill supplied."),
+            ("OUTPAINT MASK ROLE", mask_description),
+            ("STAGE SKILL", stage_skill),
             ("KNOWLEDGE", context.knowledge or "No additional knowledge supplied."),
             (
                 "VALIDATED HISTORY",
@@ -70,13 +86,7 @@ class PromptEngine:
                 "\n".join(f"- {item}" for item in context.comments)
                 or "No operator comments.",
             ),
-            (
-                "EXECUTION",
-                "Use reference image 1 as the corrected and approved geometry. "
-                "Use reference image 2 as the aligned binary edit mask. "
-                "Generate the requested environment only in mandatory edit areas. "
-                "Return a visibly changed and fully filled environment while preserving approved architecture.",
-            ),
+            ("EXECUTION", execution),
         ]
         prompt = "\n\n".join(
             f"{title}\n{body.strip()}" for title, body in sections
@@ -98,4 +108,6 @@ class PromptEngine:
             "approved_geometry_asset": context.approved_geometry_asset,
             "approved_mask_asset": context.approved_mask_asset,
             "operator_comment_count": len(context.comments),
+            "generation_mode": "full-frame-reference" if is_environment else "stage-default",
+            "mask_role": "quality-control-only" if is_environment else "stage-default",
         }
