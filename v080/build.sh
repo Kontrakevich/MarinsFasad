@@ -19,7 +19,7 @@ grep -q 'connected-components-soft-clamp' "$ROOT/app/selective_policy.py"
 grep -q 'non-blocking-connected-components-warning' "$ROOT/app/outpaint_qc_policy.py"
 grep -q 'opaque-marker-plus-zoomed-nano-banana-tiles' "$ROOT/app/missing_region_policy.py"
 grep -q 'outpaint-tiles' "$ROOT/app/missing_region_policy.py"
-grep -q 'transport_engine_version = "2.8.0"' "$ROOT/app/runtime_version_policy.py"
+grep -q 'transport_engine_version = "2.7.2"' "$ROOT/app/runtime_version_policy.py"
 grep -q 'magenta/cyan checkerboard' "$ROOT/app/prompt_engine.py"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
@@ -62,7 +62,7 @@ from app.system_prompts import PROMPT_CONTRACT_VERSION
 
 os.environ["OPENROUTER_IMAGE_MODEL"] = "must-be-ignored/test-model"
 engine = OpenRouterImageEngine()
-assert OpenRouterImageEngine.transport_engine_version == "2.8.0"
+assert OpenRouterImageEngine.transport_engine_version == "2.7.2"
 assert engine.model == "google/gemini-2.5-flash-image"
 assert engine.required_model == "google/gemini-2.5-flash-image"
 assert engine.generation_mode == "selective-edit"
