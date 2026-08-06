@@ -227,13 +227,42 @@ def test_global_regeneration_is_suppressed_without_rejecting_result(tmp_path):
     assert result["pixel_preservation_verified"] is True
 
 
+def test_outpaint_qc_is_warning_only_and_never_rejects_candidate(tmp_path):
+    size = (100, 80)
+    geometry = tmp_path / "geometry.png"
+    mask = tmp_path / "mask.png"
+    provider = tmp_path / "provider.png"
+    make_geometry(geometry, size, (10, 20, 30, 255))
+    Image.new("L", size, 255).save(mask, format="PNG")
+    Image.new("RGB", size, (0, 0, 0)).save(provider, format="PNG")
+
+    result = OpenRouterImageEngine()._promote_provider_output(
+        provider_output=provider,
+        geometry_image=geometry,
+        outpaint_mask=mask,
+        prepared={
+            "content_box_normalized": {"x": 0, "y": 0, "width": 1, "height": 1},
+            "effective_mask_path": str(mask),
+        },
+        output_dir=tmp_path,
+        width=size[0],
+        height=size[1],
+    )
+
+    assert Path(result["candidate"]).is_file()
+    assert result["outpaint_qc_warning"] is True
+    assert result["outpaint_qc_status"] == "warning"
+    assert result["outpaint_qc_blocking"] is False
+    assert result["outpaint_qc_policy"] == "non-blocking-connected-components-warning"
+
+
 def test_prepared_request_content_length_is_exact():
     engine = OpenRouterImageEngine()
     body = b'{"model":"test","prompt":"x"}'
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "2.7.1"
+    assert prepared.headers["X-Marins-Transport-Engine"] == "2.7.2"
 
 
 def test_extract_openrouter_limits_and_supported_sizes():
