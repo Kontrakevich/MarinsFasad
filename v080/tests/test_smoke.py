@@ -15,11 +15,13 @@ def test_health():
     assert payload['runtime'] == 'standalone-v080'
     assert payload['transport_policy'] == 'provider-aware-temporary-copy'
     assert payload['generation_mode'] == 'background-job-polling'
-    assert OpenRouterImageEngine.transport_engine_version == '2.5.0'
+    assert OpenRouterImageEngine.transport_engine_version == '2.6.0'
     assert OpenRouterImageEngine.default_transmit_max_request_bytes == 32 * 1024 * 1024
     assert OpenRouterImageEngine._select_provider_size(8064, 6048) == (1536, 1024)
+    assert OpenRouterImageEngine.minimum_full_frame_change_ratio > 0
+    assert OpenRouterImageEngine.minimum_non_mask_change_ratio > 0
     assert ENVIRONMENT_SYSTEM_PROMPT
-    assert PROMPT_CONTRACT_VERSION == 'environment-system-v1.1'
+    assert PROMPT_CONTRACT_VERSION == 'environment-system-v1.2'
 
 
 def test_project_create_and_list():
