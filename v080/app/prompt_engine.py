@@ -38,24 +38,23 @@ class PromptEngine:
 
         if is_environment:
             stage_skill = (
-                "Generate the complete output frame from the approved corrected geometry. "
-                "Use the geometry as the structural and compositional reference for the whole image. "
-                "Do not limit generation to transparent, black or formerly masked areas. "
-                "The outpaint mask is for post-generation quality control only and must not restrict the provider output."
+                "Use Nano Banana for selective image editing only. "
+                "Treat the approved corrected image as the immutable base. "
+                "Modify only the exact local objects or areas named by the operator and all mandatory white-mask areas. "
+                "Do not regenerate, recolor, relight or redesign the complete frame. "
+                "Every unaffected pixel must remain identical after final compositing."
             )
             mask_description = (
                 f"{context.approved_mask_asset}\n"
-                "The outpaint mask is retained for post-generation quality control only and is not sent as a generation constraint."
+                "White pixels are mandatory edit/outpaint areas. Black pixels remain protected unless the operator prompt explicitly names one local target there."
                 if context.approved_mask_asset
-                else "The approved mask is retained for post-generation quality control only and is not sent as a generation constraint."
+                else "No mandatory outpaint mask is present. Local edit targets must be derived only from the operator prompt."
             )
             execution = (
-                "Use reference image 1 as the corrected and approved geometry foundation. "
-                "Regenerate the entire canvas as one coherent photorealistic scene. "
-                "Preserve the corrected architectural structure, perspective, proportions, floor count and window rhythm, "
-                "but create fresh pixels across the complete frame. "
-                "Fill all former transparent or black areas naturally. "
-                "Do not return an unchanged source and do not generate only inside the former mask."
+                "Use reference image 1 as the immutable approved base and reference image 2 as the mandatory edit map. "
+                "Perform only the point changes explicitly requested in OPERATOR COMMENTS. "
+                "Keep edits localized. Preserve every unaffected element and do not create a full-frame variation. "
+                "Return one complete image at the same composition and dimensions."
             )
         else:
             stage_skill = context.skill or "No stage-specific skill supplied."
@@ -67,15 +66,15 @@ class PromptEngine:
             ("PROMPT CONTRACT", contract_version),
             ("CURRENT STAGE", context.stage.upper()),
             (
-                "APPROVED GEOMETRY INPUT",
+                "APPROVED IMMUTABLE BASE",
                 context.approved_geometry_asset
                 or (
-                    "Reference image 1 supplied by the environment pipeline is the corrected and approved geometry."
+                    "Reference image 1 supplied by the environment pipeline is the corrected and approved immutable base."
                     if is_environment
                     else "No approved geometry asset supplied."
                 ),
             ),
-            ("OUTPAINT MASK ROLE", mask_description),
+            ("EDIT MASK ROLE", mask_description),
             ("STAGE SKILL", stage_skill),
             ("KNOWLEDGE", context.knowledge or "No additional knowledge supplied."),
             (
@@ -84,9 +83,9 @@ class PromptEngine:
                 or "No validated history.",
             ),
             (
-                "OPERATOR COMMENTS — MANDATORY",
+                "OPERATOR COMMENTS — MANDATORY LOCAL CHANGES",
                 "\n".join(f"- {item}" for item in context.comments)
-                or "No operator comments.",
+                or "No additional local changes. Fill only mandatory outpaint areas.",
             ),
             ("EXECUTION", execution),
         ]
@@ -110,6 +109,8 @@ class PromptEngine:
             "approved_geometry_asset": context.approved_geometry_asset,
             "approved_mask_asset": context.approved_mask_asset,
             "operator_comment_count": len(context.comments),
-            "generation_mode": "full-frame-reference" if is_environment else "stage-default",
-            "mask_role": "quality-control-only" if is_environment else "stage-default",
+            "generation_mode": "selective-edit" if is_environment else "stage-default",
+            "mask_role": "mandatory-edit-reference" if is_environment else "stage-default",
+            "provider_model": "google/gemini-2.5-flash-image" if is_environment else "stage-default",
+            "pixel_preservation": "outside-edit-area-exact" if is_environment else "stage-default",
         }
