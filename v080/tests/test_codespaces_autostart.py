@@ -27,7 +27,7 @@ def test_legacy_codespaces_launchers_redirect_to_v080() -> None:
 
 def test_v080_start_synchronizes_current_ui() -> None:
     start = (REPO_ROOT / "v080" / "start.sh").read_text("utf-8")
-    assert 'EXPECTED_TRANSPORT_ENGINE="2.7.1"' in start
+    assert 'EXPECTED_TRANSPORT_ENGINE="2.7.2"' in start
     assert 'EXPECTED_PROMPT_CONTRACT="environment-system-v1.3"' in start
     assert 'EXPECTED_MODEL="google/gemini-2.5-flash-image"' in start
     assert 'ui_single_window/index.html' in start
