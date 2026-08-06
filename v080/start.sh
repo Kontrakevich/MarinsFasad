@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="/tmp/marins-facade-v080.pid"
 LOG_FILE="/tmp/marins-facade-v080.log"
 HEALTH_FILE="/tmp/marins-facade-v080-health.json"
-EXPECTED_TRANSPORT_ENGINE="2.7.0"
+EXPECTED_TRANSPORT_ENGINE="2.7.1"
 EXPECTED_PROMPT_CONTRACT="environment-system-v1.3"
 EXPECTED_MODEL="google/gemini-2.5-flash-image"
 
@@ -75,18 +75,20 @@ if OpenRouterImageEngine._select_provider_size(8064, 6048) != (1536, 1024):
     raise SystemExit("Provider output size policy is not active")
 if not ENVIRONMENT_SYSTEM_PROMPT:
     raise SystemExit("Environment system prompt is not configured")
-if engine.maximum_semantic_edit_ratio > 0.25:
-    raise SystemExit("Selective edit area guard is not active")
+if engine.maximum_total_selective_edit_ratio > 0.08:
+    raise SystemExit("Selective soft-clamp budget is not active")
+if engine.maximum_component_edit_ratio > 0.03:
+    raise SystemExit("Local component guard is not active")
 if health().get("generation_mode") != "background-job-polling":
     raise SystemExit("Background generation polling is not active")
 print(f"Transport engine {actual} verified")
 print(f"System prompt contract: {PROMPT_CONTRACT_VERSION}")
 print(f"Image model locked: {engine.model}")
 print("Generation mode: background job + resilient browser polling")
-print("Edit mode: selective local changes only")
+print("Edit mode: exact local changes with soft-clamped delta compositing")
 print("Base image: pixel-preserved outside final edit area")
 print("Mandatory outpaint: approved white mask and transparent geometry")
-print("Global regeneration guard: active")
+print("Global regeneration: suppressed instead of rejected")
 PY
 
 : > "$LOG_FILE"
@@ -127,7 +129,7 @@ PY
       echo "Transport engine: $EXPECTED_TRANSPORT_ENGINE"
       echo "Prompt contract: $EXPECTED_PROMPT_CONTRACT"
       echo "Image model: $EXPECTED_MODEL"
-      echo "Edit mode: selective local changes with pixel preservation"
+      echo "Edit mode: exact local changes with pixel preservation"
       cat "$HEALTH_FILE"
       exit 0
     fi
