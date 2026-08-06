@@ -1,9 +1,8 @@
 from pathlib import Path
 
-import pytest
 from PIL import Image
 
-from app.ai_engine import AIEngineError, OpenRouterImageEngine
+from app.ai_engine import OpenRouterImageEngine
 from app.system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
 
 
@@ -82,7 +81,7 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     })
 
     result = engine.prepare_environment_inputs(
-        prompt="Preserve architecture and fill the mask.",
+        prompt="Regenerate the complete frame from the corrected geometry.",
         geometry_image=geometry,
         outpaint_mask=mask,
         output_dir=tmp_path / "transport",
@@ -94,11 +93,14 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     assert result["request_body_bytes"] <= result["target_request_bytes"]
     assert result["request_body_bytes"] <= engine.transmit_max_request_bytes
     assert result["resized_for_provider"] is True
-    assert result["source_contract"] == "corrected-approved-geometry"
+    assert result["source_contract"] == "corrected-approved-geometry-full-frame-reference"
     assert result["system_prompt_in_request"] is True
     assert result["system_prompt_contract"] == PROMPT_CONTRACT_VERSION
     assert result["full_canvas_generation"] is True
-    assert result["mask_policy"] == "white-mask-or-transparent-geometry-generate"
+    assert result["generation_mode"] == "full-frame-reference"
+    assert result["input_reference_count"] == 1
+    assert result["mask_role"] == "quality-control-only"
+    assert result["mask_policy"] == "qc-only-white-mask-or-transparent-geometry"
     assert result["approved_geometry_sha256"]
     assert result["approved_mask_sha256"]
     assert result["effective_mask_sha256"]
@@ -118,7 +120,7 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     assert 0 < result["content_box_normalized"]["height"] <= 1
 
 
-def test_payload_contains_system_prompt_and_two_approved_references(tmp_path):
+def test_payload_contains_system_prompt_and_only_geometry_reference(tmp_path):
     geometry = tmp_path / "approved-geometry.png"
     mask = tmp_path / "approved-mask.png"
     make_geometry(geometry, (320, 240))
@@ -134,39 +136,53 @@ def test_payload_contains_system_prompt_and_two_approved_references(tmp_path):
     assert ENVIRONMENT_SYSTEM_PROMPT in payload["prompt"]
     assert PROMPT_CONTRACT_VERSION in payload["prompt"]
     assert "Operator requirement: clear daytime sky." in payload["prompt"]
-    assert len(payload["input_references"]) == 2
+    assert len(payload["input_references"]) == 1
     assert payload["input_references"][0]["image_url"]["url"].startswith("data:image/")
-    assert payload["input_references"][1]["image_url"]["url"].startswith("data:image/")
+    assert "mask" not in payload
 
 
-def test_empty_effective_mask_blocks_provider_preflight_before_credits(tmp_path):
+def test_empty_effective_mask_does_not_limit_full_frame_generation(tmp_path, monkeypatch):
     geometry = tmp_path / "geometry.png"
     mask = tmp_path / "empty-mask.png"
     make_geometry(geometry, (320, 240))
     Image.new("L", (320, 240), 0).save(mask, format="PNG")
 
-    with pytest.raises(AIEngineError) as captured:
-        OpenRouterImageEngine().prepare_environment_inputs(
-            prompt="Generate surroundings.",
-            geometry_image=geometry,
-            outpaint_mask=mask,
-            output_dir=tmp_path / "transport",
-            width=320,
-            height=240,
-        )
+    engine = OpenRouterImageEngine()
+    monkeypatch.setattr(engine, "discover_capabilities", lambda: {
+        "provider": "openrouter",
+        "model": engine.model,
+        "transport_engine_version": engine.transport_engine_version,
+        "gateway_hard_max_request_bytes": engine.gateway_hard_max_request_bytes,
+        "max_request_bytes": 52428800,
+        "transmit_max_request_bytes": engine.transmit_max_request_bytes,
+        "target_request_bytes": engine.transmit_max_request_bytes,
+        "request_limit_source": "test",
+        "supported_parameters": {},
+        "supported_output_sizes": ["1024x1024", "1024x1536", "1536x1024"],
+        "providers": [],
+        "discovery_errors": [],
+    })
 
-    assert captured.value.details["provider_call_made"] is False
-    assert captured.value.details["credits_spent"] is False
-    assert captured.value.details["reason"] == "empty_effective_edit_mask"
+    prepared = engine.prepare_environment_inputs(
+        prompt="Generate the complete frame.",
+        geometry_image=geometry,
+        outpaint_mask=mask,
+        output_dir=tmp_path / "transport",
+        width=320,
+        height=240,
+    )
+
+    assert prepared["editable_pixels"] == 0
+    assert prepared["generation_mode"] == "full-frame-reference"
+    assert prepared["input_reference_count"] == 1
 
 
-def test_provider_output_is_remapped_and_geometry_is_preserved(tmp_path):
+def test_provider_output_becomes_entire_candidate_without_geometry_composite(tmp_path):
     geometry = tmp_path / "geometry.png"
     mask = tmp_path / "mask.png"
     provider = tmp_path / "provider.png"
 
-    geometry_image = Image.new("RGBA", (8, 6), (10, 20, 30, 255))
-    geometry_image.save(geometry, format="PNG")
+    Image.new("RGBA", (8, 6), (10, 20, 30, 255)).save(geometry, format="PNG")
     mask_image = Image.new("L", (8, 6), 0)
     mask_image.paste(255, (0, 0, 2, 6))
     mask_image.save(mask, format="PNG")
@@ -195,13 +211,16 @@ def test_provider_output_is_remapped_and_geometry_is_preserved(tmp_path):
     with Image.open(result["candidate"]) as candidate:
         assert candidate.mode == "RGB"
         assert candidate.size == (8, 6)
-        assert candidate.getpixel((3, 3)) == (10, 20, 30)
+        assert candidate.getpixel((3, 3)) == (200, 100, 50)
         assert candidate.getpixel((0, 3)) == (200, 100, 50)
 
     assert result["remapped_to_master"] is True
-    assert result["approved_geometry_preserved"] is True
+    assert result["approved_geometry_preserved"] is False
+    assert result["approved_geometry_used_as_reference"] is True
     assert result["meaningful_generation"] is True
     assert result["full_canvas_generation"] is True
+    assert result["generation_mode"] == "full-frame-reference"
+    assert result["non_mask_change_ratio"] > 0
 
 
 def test_prepared_request_content_length_is_exact():
@@ -210,7 +229,7 @@ def test_prepared_request_content_length_is_exact():
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "2.5.0"
+    assert prepared.headers["X-Marins-Transport-Engine"] == "2.6.0"
     assert prepared.headers["X-Marins-Request-Bytes"] == str(len(body))
 
 
