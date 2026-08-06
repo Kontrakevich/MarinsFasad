@@ -6,6 +6,18 @@ LOG_FILE="/tmp/marins-facade-v080.log"
 HEALTH_FILE="/tmp/marins-facade-v080-health.json"
 EXPECTED_TRANSPORT_ENGINE="2.4.0"
 
+# A legacy Codespaces configuration used release/start_v060.sh. Remove its
+# stale process marker before taking ownership of the shared application port.
+if [ -f "/tmp/marins-facade-v060.pid" ]; then
+  LEGACY_PID="$(cat /tmp/marins-facade-v060.pid 2>/dev/null || true)"
+  if [ -n "$LEGACY_PID" ] && kill -0 "$LEGACY_PID" 2>/dev/null; then
+    kill "$LEGACY_PID" 2>/dev/null || true
+    sleep 1
+    kill -9 "$LEGACY_PID" 2>/dev/null || true
+  fi
+  rm -f /tmp/marins-facade-v060.pid
+fi
+
 if [ -f "$PID_FILE" ]; then
   OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
   if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
@@ -26,6 +38,15 @@ if ss -ltnp 2>/dev/null | grep -q ':8070 '; then
 fi
 
 cd "$ROOT"
+
+# The editable single-window UI is the source of truth. Synchronize it into
+# the FastAPI static runtime on every Codespaces restart so an old generated
+# app/web directory can never reappear.
+cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
+cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
+cp -f "$ROOT/ui_single_window/app-v080.js" "$ROOT/app/web/app-v080.js"
+cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
+
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$ROOT" -type f -name '*.pyc' -delete
 python -B - "$EXPECTED_TRANSPORT_ENGINE" <<'PY'
