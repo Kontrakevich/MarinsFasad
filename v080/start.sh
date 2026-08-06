@@ -4,8 +4,8 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="/tmp/marins-facade-v080.pid"
 LOG_FILE="/tmp/marins-facade-v080.log"
 HEALTH_FILE="/tmp/marins-facade-v080-health.json"
-EXPECTED_TRANSPORT_ENGINE="2.5.0"
-EXPECTED_PROMPT_CONTRACT="environment-system-v1.1"
+EXPECTED_TRANSPORT_ENGINE="2.6.0"
+EXPECTED_PROMPT_CONTRACT="environment-system-v1.2"
 
 if [ -f "/tmp/marins-facade-v060.pid" ]; then
   LEGACY_PID="$(cat /tmp/marins-facade-v060.pid 2>/dev/null || true)"
@@ -38,7 +38,8 @@ fi
 
 cd "$ROOT"
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
-sed -i 's/ui-lift-0803/ui-async-0804/g' "$ROOT/app/web/index.html"
+sed -i 's/ui-lift-0803/ui-fullframe-0806/g' "$ROOT/app/web/index.html"
+sed -i 's/ui-async-0804/ui-fullframe-0806/g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
 cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" > "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
@@ -65,18 +66,20 @@ if OpenRouterImageEngine._select_provider_size(8064, 6048) != (1536, 1024):
     raise SystemExit("Provider output size policy is not active")
 if not ENVIRONMENT_SYSTEM_PROMPT:
     raise SystemExit("Environment system prompt is not configured")
-if engine.minimum_editable_pixels < 64:
-    raise SystemExit("Empty-mask credit guard is not active")
+if engine.minimum_full_frame_change_ratio <= 0:
+    raise SystemExit("Full-frame change guard is not active")
+if engine.minimum_non_mask_change_ratio <= 0:
+    raise SystemExit("Mask-only generation guard is not active")
 if health().get("generation_mode") != "background-job-polling":
     raise SystemExit("Background generation polling is not active")
 print(f"Transport engine {actual} verified")
 print(f"OpenRouter transmit ceiling: {engine.transmit_max_request_bytes} bytes")
 print(f"System prompt contract: {PROMPT_CONTRACT_VERSION}")
 print("Generation mode: background job + browser polling")
-print("Input contract: approved corrected geometry + full-canvas effective mask")
-print("Editable area: white approved mask OR transparent geometry")
-print("Credit guard: empty effective mask blocks provider call")
-print("Provider output policy: 8064x6048 -> 1536x1024 -> master remap")
+print("Environment mode: full-frame generation from approved corrected geometry")
+print("Provider input: one approved geometry reference")
+print("Mask role: quality control only; it does not limit generation")
+print("Provider output policy: 8064x6048 -> 1536x1024 -> full-frame master remap")
 PY
 
 : > "$LOG_FILE"
@@ -115,6 +118,7 @@ PY
       echo "Transport engine: $EXPECTED_TRANSPORT_ENGINE"
       echo "Prompt contract: $EXPECTED_PROMPT_CONTRACT"
       echo "Generation mode: background job + browser polling"
+      echo "Environment mode: full-frame geometry-reference generation"
       cat "$HEALTH_FILE"
       exit 0
     fi
