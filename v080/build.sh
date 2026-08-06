@@ -17,8 +17,9 @@ grep -q 'background-job-polling' "$ROOT/app/main.py"
 grep -q 'google/gemini-2.5-flash-image' "$ROOT/app/selective_policy.py"
 grep -q 'connected-components-soft-clamp' "$ROOT/app/selective_policy.py"
 grep -q 'non-blocking-connected-components-warning' "$ROOT/app/outpaint_qc_policy.py"
-grep -q 'opaque-chroma-marker-with-nano-banana-auto-retry' "$ROOT/app/missing_region_policy.py"
-grep -q 'transport_engine_version = "2.7.2"' "$ROOT/app/runtime_version_policy.py"
+grep -q 'opaque-marker-plus-zoomed-nano-banana-tiles' "$ROOT/app/missing_region_policy.py"
+grep -q 'outpaint-tiles' "$ROOT/app/missing_region_policy.py"
+grep -q 'transport_engine_version = "2.8.0"' "$ROOT/app/runtime_version_policy.py"
 grep -q 'magenta/cyan checkerboard' "$ROOT/app/prompt_engine.py"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
@@ -61,7 +62,7 @@ from app.system_prompts import PROMPT_CONTRACT_VERSION
 
 os.environ["OPENROUTER_IMAGE_MODEL"] = "must-be-ignored/test-model"
 engine = OpenRouterImageEngine()
-assert OpenRouterImageEngine.transport_engine_version == "2.7.2"
+assert OpenRouterImageEngine.transport_engine_version == "2.8.0"
 assert engine.model == "google/gemini-2.5-flash-image"
 assert engine.required_model == "google/gemini-2.5-flash-image"
 assert engine.generation_mode == "selective-edit"
@@ -74,16 +75,17 @@ assert engine.maximum_component_edit_ratio <= 0.03
 assert engine.maximum_component_bbox_ratio <= 0.20
 assert engine.outpaint_qc_blocking is False
 assert engine.outpaint_qc_policy == "non-blocking-connected-components-warning"
-assert engine.missing_region_transport_policy == "opaque-chroma-marker-with-nano-banana-auto-retry"
-assert engine.outpaint_auto_retry_limit == 1
+assert engine.missing_region_transport_policy == "opaque-marker-plus-zoomed-nano-banana-tiles"
+assert engine.outpaint_repair_mode == "component-tiles"
+assert engine.outpaint_tile_max_calls == 8
 print(
     f"Transport engine {OpenRouterImageEngine.transport_engine_version}; "
     f"model {engine.model}; "
     f"prompt contract {PROMPT_CONTRACT_VERSION}; "
     "background generation polling active; "
-    "soft-clamped selective edits active; "
-    "missing regions use opaque markers and one automatic Nano Banana retry; "
+    "exact UI prompt first pass active; "
+    "missing regions reconstructed as zoomed Nano Banana tiles; "
     "pixel preservation outside edit area active"
 )
 PY
-echo "Marins Facade v0.8.0 Nano Banana selective reconstruction build passed"
+echo "Marins Facade v0.8.0 Nano Banana tiled reconstruction build passed"
