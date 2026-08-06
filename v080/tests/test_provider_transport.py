@@ -1,9 +1,8 @@
 from pathlib import Path
 
-import pytest
 from PIL import Image
 
-from app.ai_engine import AIEngineError, OpenRouterImageEngine
+from app.ai_engine import OpenRouterImageEngine
 from app.system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
 
 
@@ -102,6 +101,8 @@ def test_transport_is_selective_and_does_not_change_masters(tmp_path, monkeypatc
     assert result["input_reference_count"] == 2
     assert result["full_canvas_generation"] is False
     assert result["pixel_preservation_required"] is True
+    assert result["localization_policy"] == "connected-components-soft-clamp"
+    assert result["maximum_total_selective_edit_ratio"] == 0.08
     assert result["system_prompt_contract"] == PROMPT_CONTRACT_VERSION
     assert Path(result["effective_mask_path"]).is_file()
     assert geometry.read_bytes() == geometry_before
@@ -192,9 +193,10 @@ def test_candidate_preserves_base_outside_local_edit(tmp_path):
     assert result["outside_changed_pixels"] == 0
     assert result["generation_mode"] == "selective-edit"
     assert result["provider_model"] == NANO_BANANA
+    assert result["kept_component_count"] >= 1
 
 
-def test_global_regeneration_is_rejected(tmp_path):
+def test_global_regeneration_is_suppressed_without_rejecting_result(tmp_path):
     size = (100, 80)
     geometry = tmp_path / "geometry.png"
     mask = tmp_path / "mask.png"
@@ -203,20 +205,26 @@ def test_global_regeneration_is_rejected(tmp_path):
     Image.new("L", size, 0).save(mask, format="PNG")
     Image.new("RGB", size, (200, 100, 50)).save(provider, format="PNG")
 
-    with pytest.raises(AIEngineError) as captured:
-        OpenRouterImageEngine()._promote_provider_output(
-            provider_output=provider,
-            geometry_image=geometry,
-            outpaint_mask=mask,
-            prepared={
-                "content_box_normalized": {"x": 0, "y": 0, "width": 1, "height": 1},
-                "effective_mask_path": str(mask),
-            },
-            output_dir=tmp_path,
-            width=size[0],
-            height=size[1],
-        )
-    assert captured.value.details["reason"] == "semantic_edit_area_too_large"
+    result = OpenRouterImageEngine()._promote_provider_output(
+        provider_output=provider,
+        geometry_image=geometry,
+        outpaint_mask=mask,
+        prepared={
+            "content_box_normalized": {"x": 0, "y": 0, "width": 1, "height": 1},
+            "effective_mask_path": str(mask),
+        },
+        output_dir=tmp_path,
+        width=size[0],
+        height=size[1],
+    )
+
+    with Image.open(result["candidate"]) as candidate:
+        assert candidate.convert("RGB").getpixel((50, 40)) == (10, 20, 30)
+
+    assert result["global_generation_suppressed"] is True
+    assert result["selected_semantic_pixels"] == 0
+    assert result["outside_changed_pixels"] == 0
+    assert result["pixel_preservation_verified"] is True
 
 
 def test_prepared_request_content_length_is_exact():
@@ -225,7 +233,7 @@ def test_prepared_request_content_length_is_exact():
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "2.7.0"
+    assert prepared.headers["X-Marins-Transport-Engine"] == "2.7.1"
 
 
 def test_extract_openrouter_limits_and_supported_sizes():
