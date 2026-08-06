@@ -4,7 +4,8 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
-sed -i 's/ui-lift-0803/ui-async-0804/g' "$ROOT/app/web/index.html"
+sed -i 's/ui-lift-0803/ui-fullframe-0806/g' "$ROOT/app/web/index.html"
+sed -i 's/ui-async-0804/ui-fullframe-0806/g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
 cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" > "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
@@ -43,18 +44,20 @@ from app.main import health
 from app.system_prompts import PROMPT_CONTRACT_VERSION
 
 engine = OpenRouterImageEngine()
-assert OpenRouterImageEngine.transport_engine_version == "2.5.0"
+assert OpenRouterImageEngine.transport_engine_version == "2.6.0"
 assert engine.transmit_max_request_bytes <= 32 * 1024 * 1024
 assert OpenRouterImageEngine._select_provider_size(8064, 6048) == (1536, 1024)
-assert engine.minimum_editable_pixels >= 64
-assert PROMPT_CONTRACT_VERSION == "environment-system-v1.1"
+assert PROMPT_CONTRACT_VERSION == "environment-system-v1.2"
 assert health()["generation_mode"] == "background-job-polling"
+assert engine.minimum_full_frame_change_ratio > 0
+assert engine.minimum_non_mask_change_ratio > 0
 print(
     f"Transport engine {OpenRouterImageEngine.transport_engine_version}; "
     f"transmit ceiling {engine.transmit_max_request_bytes} bytes; "
     f"prompt contract {PROMPT_CONTRACT_VERSION}; "
     "background generation polling active; "
-    "full-canvas effective-mask generation active"
+    "full-frame geometry-reference generation active; "
+    "mask is QC-only"
 )
 PY
-echo "Marins Facade v0.8.0 asynchronous full-canvas generation build passed"
+echo "Marins Facade v0.8.0 full-frame environment generation build passed"
