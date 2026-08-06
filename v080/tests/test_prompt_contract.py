@@ -17,7 +17,7 @@ def test_environment_compiled_prompt_contains_authoritative_system_contract(tmp_
     assert result["contract_version"] == PROMPT_CONTRACT_VERSION
     assert ENVIRONMENT_SYSTEM_PROMPT in result["prompt"]
     assert "Заменить только автомобиль справа на дерево." in result["prompt"]
-    assert "immutable approved base" in result["prompt"]
+    assert "approved immutable base" in result["prompt"]
     assert "selective image editing only" in result["prompt"]
     assert result["provider_model"] == "google/gemini-2.5-flash-image"
     assert result["system_prompt_sha256"]
