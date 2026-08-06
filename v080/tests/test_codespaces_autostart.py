@@ -27,9 +27,11 @@ def test_legacy_codespaces_launchers_redirect_to_v080() -> None:
 
 def test_v080_start_synchronizes_current_ui() -> None:
     start = (REPO_ROOT / "v080" / "start.sh").read_text("utf-8")
-    assert 'EXPECTED_TRANSPORT_ENGINE="2.5.0"' in start
+    assert 'EXPECTED_TRANSPORT_ENGINE="2.6.0"' in start
+    assert 'EXPECTED_PROMPT_CONTRACT="environment-system-v1.2"' in start
     assert 'ui_single_window/index.html' in start
     assert 'ui_single_window/styles.css' in start
     assert 'ui_single_window/app-v080.js' in start
     assert 'rm -f /tmp/marins-facade-v060.pid' in start
-    assert 'Input contract: approved corrected geometry + full-canvas effective mask' in start
+    assert 'Environment mode: full-frame generation from approved corrected geometry' in start
+    assert 'Mask role: quality control only; it does not limit generation' in start
