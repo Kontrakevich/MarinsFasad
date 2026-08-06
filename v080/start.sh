@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="/tmp/marins-facade-v080.pid"
 LOG_FILE="/tmp/marins-facade-v080.log"
 HEALTH_FILE="/tmp/marins-facade-v080-health.json"
-EXPECTED_TRANSPORT_ENGINE="2.7.2"
+EXPECTED_TRANSPORT_ENGINE="2.7.1"
 EXPECTED_PROMPT_CONTRACT="environment-system-v1.3"
 EXPECTED_MODEL="google/gemini-2.5-flash-image"
 
@@ -50,6 +50,7 @@ grep -q 'Внесите только указанные точечные изм�
 grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
 grep -q 'background-job-polling' "$ROOT/app/main.py"
 grep -q 'outpaint_qc_policy' "$ROOT/app/outpaint_qc_policy.py"
+grep -q 'opaque-chroma-marker-with-nano-banana-auto-retry' "$ROOT/app/missing_region_policy.py"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$ROOT" -type f -name '*.pyc' -delete
@@ -84,6 +85,10 @@ if engine.outpaint_qc_blocking is not False:
     raise SystemExit("Outpaint QC must be warning-only")
 if engine.outpaint_qc_policy != "non-blocking-connected-components-warning":
     raise SystemExit("Non-blocking outpaint QC policy is not active")
+if engine.missing_region_transport_policy != "opaque-chroma-marker-with-nano-banana-auto-retry":
+    raise SystemExit("Missing-region reconstruction policy is not active")
+if engine.outpaint_auto_retry_limit != 1:
+    raise SystemExit("Automatic outpaint reconstruction retry is not active")
 if health().get("generation_mode") != "background-job-polling":
     raise SystemExit("Background generation polling is not active")
 print(f"Transport engine {actual} verified")
@@ -92,9 +97,9 @@ print(f"Image model locked: {engine.model}")
 print("Generation mode: background job + resilient browser polling")
 print("Edit mode: exact local changes with soft-clamped delta compositing")
 print("Base image: pixel-preserved outside final edit area")
-print("Mandatory outpaint: approved white mask and transparent geometry")
-print("Global regeneration: suppressed instead of rejected")
-print("Outpaint QC: warning-only; it never cancels a prompt-driven result")
+print("Missing regions: opaque service marker; transparent pixels are never flattened to white")
+print("Outpaint reconstruction: one automatic Nano Banana correction attempt")
+print("Solid white wedges: rejected as non-generated content")
 PY
 
 : > "$LOG_FILE"
@@ -135,8 +140,7 @@ PY
       echo "Transport engine: $EXPECTED_TRANSPORT_ENGINE"
       echo "Prompt contract: $EXPECTED_PROMPT_CONTRACT"
       echo "Image model: $EXPECTED_MODEL"
-      echo "Edit mode: exact local changes with pixel preservation"
-      echo "Outpaint QC: warning-only"
+      echo "Missing regions: Nano Banana reconstruction required"
       cat "$HEALTH_FILE"
       exit 0
     fi
