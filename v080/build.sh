@@ -38,15 +38,19 @@ MARINS_DATA_ROOT="$ROOT/.test-data/projects" python -m pytest -q
 rm -rf .test-data
 python - <<'PY'
 from app.ai_engine import OpenRouterImageEngine
+from app.system_prompts import PROMPT_CONTRACT_VERSION
+
 engine = OpenRouterImageEngine()
-assert OpenRouterImageEngine.transport_engine_version == "2.4.0"
+assert OpenRouterImageEngine.transport_engine_version == "2.5.0"
 assert engine.transmit_max_request_bytes <= 32 * 1024 * 1024
 assert OpenRouterImageEngine._select_provider_size(8064, 6048) == (1536, 1024)
 assert engine.minimum_editable_pixels >= 64
+assert PROMPT_CONTRACT_VERSION == "environment-system-v1.1"
 print(
     f"Transport engine {OpenRouterImageEngine.transport_engine_version}; "
     f"transmit ceiling {engine.transmit_max_request_bytes} bytes; "
-    "empty-mask credit guard active; 8064x6048 provider canvas 1536x1024"
+    f"prompt contract {PROMPT_CONTRACT_VERSION}; "
+    "full-canvas effective-mask generation active"
 )
 PY
-echo "Marins Facade v0.8.0 meaningful-generation build passed"
+echo "Marins Facade v0.8.0 full-canvas generation build passed"
