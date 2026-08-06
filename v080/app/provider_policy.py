@@ -17,12 +17,12 @@ AIEngineError = _engine_module.AIEngineError
 
 
 class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
-    """Provider policy for approved-geometry full-canvas generation."""
+    """Политика полноформатной генерации по утверждённой геометрии."""
 
-    transport_engine_version = "2.5.0"
+    transport_engine_version = "2.6.0"
     minimum_editable_pixels = 64
-    minimum_editable_ratio = 0.00001
-    minimum_generated_change_ratio = 0.01
+    minimum_full_frame_change_ratio = 0.02
+    minimum_non_mask_change_ratio = 0.005
     maximum_unfilled_ratio = 0.01
 
     @staticmethod
@@ -91,7 +91,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             state = json.loads((project_root / "project.json").read_text("utf-8"))
         except Exception as exc:
             raise AIEngineError(
-                "Generation cancelled before provider call: project approval state is unreadable",
+                "Не удалось прочитать состояние утверждения проекта. Запрос к генератору не отправлен.",
                 details={
                     "provider_call_made": False,
                     "credits_spent": False,
@@ -124,7 +124,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         )
         if not verified:
             raise AIEngineError(
-                "Generation cancelled before provider call: corrected geometry and mask are not the exact approved project assets",
+                "Для генерации можно использовать только точные утверждённые файлы геометрии и маски проекта.",
                 details={
                     "provider_call_made": False,
                     "credits_spent": False,
@@ -159,7 +159,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
 
         if geometry.size != mask.size:
             raise AIEngineError(
-                "Approved geometry and outpaint mask have different canvas sizes",
+                "Утверждённая геометрия и маска имеют разные размеры холста.",
                 details={
                     "provider_call_made": False,
                     "credits_spent": False,
@@ -197,12 +197,26 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 "PROJECT EXECUTION PROMPT\n"
                 f"{project_prompt}"
             )
-        return super()._build_payload(
-            prompt=compiled_prompt,
-            geometry_image=geometry_image,
-            outpaint_mask=outpaint_mask,
-            provider_size=provider_size,
-        )
+
+        # Маска намеренно не отправляется провайдеру: она используется только
+        # для контроля заполнения бывших пустых областей. Генератор получает
+        # утверждённую исправленную геометрию как единственный визуальный референс
+        # и создаёт весь кадр целиком.
+        return {
+            "model": self.model,
+            "prompt": compiled_prompt,
+            "n": 1,
+            "size": f"{provider_size[0]}x{provider_size[1]}",
+            "quality": "high",
+            "output_format": "png",
+            "background": "opaque",
+            "input_references": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": self._data_url(geometry_image)},
+                }
+            ],
+        }
 
     def prepare_environment_inputs(
         self,
@@ -223,12 +237,12 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
 
         if not geometry_image.is_file():
             raise AIEngineError(
-                "Approved geometry file is missing; provider call cancelled",
+                "Файл утверждённой геометрии не найден. Запрос к генератору не отправлен.",
                 details={"provider_call_made": False, "credits_spent": False},
             )
         if not approved_mask.is_file():
             raise AIEngineError(
-                "Approved outpaint mask is missing; provider call cancelled",
+                "Файл утверждённой маски не найден. Запрос к генератору не отправлен.",
                 details={"provider_call_made": False, "credits_spent": False},
             )
 
@@ -239,22 +253,6 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             output_dir / "effective-edit-mask.png",
         )
         mask_stats = self._mask_statistics(effective_mask)
-        required_pixels = max(
-            self.minimum_editable_pixels,
-            int(mask_stats["total_pixels"] * self.minimum_editable_ratio),
-        )
-        if mask_stats["editable_pixels"] < required_pixels:
-            raise AIEngineError(
-                "Generation cancelled before provider call: the full-canvas edit mask is empty. Reapply Perspective Grid so transparent areas are present around the corrected image.",
-                details={
-                    **approval,
-                    **mask_stats,
-                    "required_editable_pixels": required_pixels,
-                    "provider_call_made": False,
-                    "credits_spent": False,
-                    "reason": "empty_effective_edit_mask",
-                },
-            )
 
         prepared = super().prepare_environment_inputs(
             prompt=prompt,
@@ -271,9 +269,9 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         prepared.update(mask_stats)
         prepared.update(
             {
-                "required_editable_pixels": required_pixels,
-                "mask_policy": "white-mask-or-transparent-geometry-generate",
-                "source_contract": "corrected-approved-geometry",
+                "mask_policy": "qc-only-white-mask-or-transparent-geometry",
+                "mask_role": "quality-control-only",
+                "source_contract": "corrected-approved-geometry-full-frame-reference",
                 "approved_geometry_path": str(geometry_image),
                 "approved_mask_path": str(approved_mask),
                 "effective_mask_path": str(effective_mask),
@@ -284,6 +282,8 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 "system_prompt_sha256": self._system_prompt_sha256(),
                 "system_prompt_in_request": True,
                 "full_canvas_generation": True,
+                "generation_mode": "full-frame-reference",
+                "input_reference_count": 1,
             }
         )
         return prepared
@@ -305,6 +305,30 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             "unfilled_editable_ratio": round(unfilled_ratio, 6),
         }
 
+    @staticmethod
+    def _changed_ratio(
+        candidate: Image.Image,
+        geometry: Image.Image,
+        area_mask: Image.Image | None = None,
+    ) -> tuple[int, int, float]:
+        difference = ImageChops.difference(
+            candidate.convert("RGB"),
+            geometry.convert("RGB"),
+        ).convert("L")
+        changed = difference.point(lambda value: 255 if value >= 6 else 0, mode="L")
+        if area_mask is not None:
+            binary_area = area_mask.point(
+                lambda value: 255 if value >= 128 else 0,
+                mode="L",
+            )
+            changed = ImageChops.multiply(changed, binary_area)
+            total = int(sum(binary_area.histogram()[128:]))
+        else:
+            total = candidate.width * candidate.height
+        changed_pixels = int(sum(changed.histogram()[128:]))
+        ratio = changed_pixels / float(max(1, total))
+        return changed_pixels, total, ratio
+
     def _promote_provider_output(
         self,
         *,
@@ -316,85 +340,132 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         width: int,
         height: int,
     ) -> dict:
-        effective_mask = Path(prepared.get("effective_mask_path") or outpaint_mask)
-        result = super()._promote_provider_output(
-            provider_output=provider_output,
-            geometry_image=geometry_image,
-            outpaint_mask=effective_mask,
-            prepared=prepared,
-            output_dir=output_dir,
-            width=width,
-            height=height,
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with Image.open(provider_output) as generated_source:
+            generated = ImageOps.exif_transpose(generated_source).convert("RGB")
+            provider_actual_size = generated.size
+
+        crop_box = self._provider_crop_box(
+            provider_actual_size,
+            prepared["content_box_normalized"],
+        )
+        cropped = generated.crop(crop_box)
+        full_frame_master = cropped.resize(
+            (width, height),
+            Image.Resampling.LANCZOS,
         )
 
-        with Image.open(result["candidate"]) as candidate_source:
-            candidate = ImageOps.exif_transpose(candidate_source).convert("RGB")
+        environment_master_path = output_dir / "environment-remapped.png"
+        candidate_path = output_dir / "candidate.png"
+        full_frame_master.save(environment_master_path, format="PNG", optimize=False)
+        full_frame_master.save(candidate_path, format="PNG", optimize=False)
+
         with Image.open(geometry_image) as geometry_source:
-            geometry = ImageOps.exif_transpose(geometry_source).convert("RGB")
+            geometry_master = ImageOps.exif_transpose(geometry_source).convert("RGB")
+        if geometry_master.size != (width, height):
+            raise AIEngineError(
+                "Утверждённая геометрия больше не соответствует размеру master canvas.",
+                details={
+                    "geometry_size": geometry_master.size,
+                    "master_size": (width, height),
+                },
+            )
+
+        effective_mask = Path(prepared.get("effective_mask_path") or outpaint_mask)
         with Image.open(effective_mask) as mask_source:
             edit_mask = ImageOps.exif_transpose(mask_source).convert("L").point(
                 lambda value: 255 if value >= 128 else 0,
                 mode="L",
             )
-
-        # Ensure a deterministic RGB production asset.
-        ImageOps.exif_transpose(candidate).convert("RGB").save(
-            result["candidate"],
-            format="PNG",
-            optimize=False,
-        )
-
-        editable_pixels = int(sum(edit_mask.histogram()[128:]))
-        difference = ImageChops.difference(candidate, geometry).convert("L")
-        changed = difference.point(
-            lambda value: 255 if value >= 6 else 0,
-            mode="L",
-        )
-        changed_in_edit_area = ImageChops.multiply(changed, edit_mask)
-        changed_pixels = int(sum(changed_in_edit_area.histogram()[128:]))
-        change_ratio = changed_pixels / float(max(1, editable_pixels))
-        unfilled = self._unfilled_statistics(candidate, edit_mask)
-
-        result.update(
-            {
-                **unfilled,
-                "generated_changed_pixels": changed_pixels,
-                "generated_change_ratio": round(change_ratio, 6),
-                "meaningful_generation": change_ratio >= self.minimum_generated_change_ratio,
-                "system_prompt_contract": PROMPT_CONTRACT_VERSION,
-                "approved_geometry_sha256": prepared.get("approved_geometry_sha256"),
-                "effective_mask_path": str(effective_mask),
-                "full_canvas_generation": True,
-            }
-        )
-
-        if unfilled["unfilled_editable_ratio"] > self.maximum_unfilled_ratio:
+        if edit_mask.size != (width, height):
             raise AIEngineError(
-                "Provider output left black or unfilled pixels in the full-canvas generation area. The candidate was retained only for diagnostics.",
+                "Контрольная маска больше не соответствует размеру master canvas.",
+                details={
+                    "mask_size": edit_mask.size,
+                    "master_size": (width, height),
+                },
+            )
+
+        unfilled = self._unfilled_statistics(full_frame_master, edit_mask)
+        full_changed, full_total, full_change_ratio = self._changed_ratio(
+            full_frame_master,
+            geometry_master,
+        )
+        non_mask = ImageOps.invert(edit_mask)
+        non_mask_changed, non_mask_total, non_mask_change_ratio = self._changed_ratio(
+            full_frame_master,
+            geometry_master,
+            non_mask,
+        )
+
+        if (
+            unfilled["editable_pixels"] > 0
+            and unfilled["unfilled_editable_ratio"] > self.maximum_unfilled_ratio
+        ):
+            raise AIEngineError(
+                "Генератор оставил чёрные или незаполненные участки в бывших пустых зонах.",
                 details={
                     "transport": prepared,
                     "provider_output": str(provider_output),
-                    "candidate": result["candidate"],
+                    "candidate": str(candidate_path),
                     **unfilled,
                     "reason": "unfilled_editable_area",
                 },
             )
 
-        if change_ratio < self.minimum_generated_change_ratio:
+        if full_change_ratio < self.minimum_full_frame_change_ratio:
             raise AIEngineError(
-                "Provider returned no meaningful visual change in the full-canvas generation area. The result was retained for diagnostics but was not promoted.",
+                "Генератор не пересоздал изображение целиком: итог почти совпадает с исправленной геометрией.",
                 details={
                     "transport": prepared,
                     "provider_output": str(provider_output),
-                    "candidate": result["candidate"],
-                    "editable_pixels": editable_pixels,
-                    "generated_changed_pixels": changed_pixels,
-                    "generated_change_ratio": round(change_ratio, 6),
-                    "reason": "provider_no_op",
+                    "candidate": str(candidate_path),
+                    "full_frame_changed_pixels": full_changed,
+                    "full_frame_total_pixels": full_total,
+                    "full_frame_change_ratio": round(full_change_ratio, 6),
+                    "reason": "provider_full_frame_no_op",
                 },
             )
 
-        return result
+        if non_mask_total > 0 and non_mask_change_ratio < self.minimum_non_mask_change_ratio:
+            raise AIEngineError(
+                "Генератор изменил только область маски, но не пересоздал остальную часть кадра.",
+                details={
+                    "transport": prepared,
+                    "provider_output": str(provider_output),
+                    "candidate": str(candidate_path),
+                    "non_mask_changed_pixels": non_mask_changed,
+                    "non_mask_total_pixels": non_mask_total,
+                    "non_mask_change_ratio": round(non_mask_change_ratio, 6),
+                    "reason": "mask_only_generation",
+                },
+            )
+
+        return {
+            "candidate": str(candidate_path),
+            "environment_master": str(environment_master_path),
+            "provider_actual_width": provider_actual_size[0],
+            "provider_actual_height": provider_actual_size[1],
+            "provider_crop_box": {
+                "left": crop_box[0],
+                "top": crop_box[1],
+                "right": crop_box[2],
+                "bottom": crop_box[3],
+            },
+            "master_width": width,
+            "master_height": height,
+            "remapped_to_master": True,
+            "approved_geometry_preserved": False,
+            "approved_geometry_used_as_reference": True,
+            "full_canvas_generation": True,
+            "generation_mode": "full-frame-reference",
+            "full_frame_changed_pixels": full_changed,
+            "full_frame_change_ratio": round(full_change_ratio, 6),
+            "non_mask_changed_pixels": non_mask_changed,
+            "non_mask_change_ratio": round(non_mask_change_ratio, 6),
+            "meaningful_generation": True,
+            **unfilled,
+        }
 
 
 _engine_module.OpenRouterImageEngine = OpenRouterImageEngine
