@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from PIL import Image
 
 from app.ai_engine import OpenRouterImageEngine
@@ -16,6 +14,29 @@ def test_long_thin_missing_region_is_split_into_zoomed_tiles():
     assert all(tile["mask_pixels"] >= engine.outpaint_tile_min_pixels for tile in tiles)
     assert all(tile["crop_box"][3] - tile["crop_box"][1] < 300 for tile in tiles)
     assert tiles[0]["crop_box"][1] == 0
+    assert engine.outpaint_tile_planner == "adaptive-3x3-border-grid"
+
+
+def test_connected_border_ring_is_separated_by_side():
+    engine = OpenRouterImageEngine()
+    width, height = 1600, 1000
+    mask = Image.new("L", (width, height), 0)
+    mask.paste(255, (0, 0, width, 35))
+    mask.paste(255, (0, height - 45, width, height))
+    mask.paste(255, (0, 0, 55, height))
+    mask.paste(255, (width - 65, 0, width, height))
+
+    tiles = engine._component_tile_boxes(mask)
+
+    assert 4 <= len(tiles) <= 8
+    assert any(tile["grid_row"] == 0 for tile in tiles)
+    assert any(tile["grid_row"] == 1 and tile["grid_column"] == 0 for tile in tiles)
+    assert any(tile["grid_row"] == 1 and tile["grid_column"] == 2 for tile in tiles)
+    assert all(
+        (tile["crop_box"][2] - tile["crop_box"][0]) < width
+        or (tile["crop_box"][3] - tile["crop_box"][1]) < height
+        for tile in tiles
+    )
 
 
 def test_missing_region_marker_is_opaque_and_not_white():
