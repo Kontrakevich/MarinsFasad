@@ -38,7 +38,12 @@ fi
 
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 rm -rf .test-data
-MARINS_DATA_ROOT="$ROOT/.test-data/projects" python -m pytest -q
+OPENROUTER_API_KEY="" \
+OPENROUTER_IMAGE_MODEL="test/no-network" \
+OPENROUTER_CAPABILITY_TIMEOUT="1" \
+OPENROUTER_IMAGE_TIMEOUT="5" \
+MARINS_DATA_ROOT="$ROOT/.test-data/projects" \
+python -m pytest -vv --timeout=60 --timeout-method=thread
 rm -rf .test-data
 python - <<'PY'
 from app.ai_engine import OpenRouterImageEngine
