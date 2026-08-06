@@ -14,6 +14,7 @@ def test_health():
     assert payload['version'] == '0.8.0'
     assert payload['runtime'] == 'standalone-v080'
     assert payload['transport_policy'] == 'provider-aware-temporary-copy'
+    assert payload['generation_mode'] == 'background-job-polling'
     assert OpenRouterImageEngine.transport_engine_version == '2.5.0'
     assert OpenRouterImageEngine.default_transmit_max_request_bytes == 32 * 1024 * 1024
     assert OpenRouterImageEngine._select_provider_size(8064, 6048) == (1536, 1024)
