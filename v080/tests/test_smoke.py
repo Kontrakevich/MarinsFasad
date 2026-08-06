@@ -16,20 +16,20 @@ def test_health():
     assert payload['transport_policy'] == 'provider-aware-temporary-copy'
     assert payload['generation_mode'] == 'background-job-polling'
     assert payload['image_model'] == 'google/gemini-2.5-flash-image'
-    assert OpenRouterImageEngine.transport_engine_version == '2.7.2'
+    assert payload['environment_input'] == 'approved-geometry-only'
+    assert payload['outpaint_detection'] == 'automatic-from-approved-geometry'
+    assert OpenRouterImageEngine.transport_engine_version == '2.9.0'
     assert OpenRouterImageEngine.required_model == 'google/gemini-2.5-flash-image'
-    assert OpenRouterImageEngine.generation_mode == 'selective-edit'
-    assert OpenRouterImageEngine.outpaint_qc_blocking is False
-    assert OpenRouterImageEngine.outpaint_qc_policy == 'non-blocking-connected-components-warning'
-    assert OpenRouterImageEngine.missing_region_transport_policy == 'opaque-marker-plus-zoomed-nano-banana-tiles'
+    assert OpenRouterImageEngine.environment_input_policy == 'approved-geometry-only'
+    assert OpenRouterImageEngine.outpaint_detection_policy == 'automatic-from-approved-geometry-transparency'
+    assert OpenRouterImageEngine.user_mask_required is False
+    assert OpenRouterImageEngine.provider_input_policy == 'single-approved-geometry-reference'
     assert OpenRouterImageEngine.outpaint_repair_mode == 'component-tiles'
     assert OpenRouterImageEngine.outpaint_tile_max_calls == 8
     assert OpenRouterImageEngine.default_transmit_max_request_bytes == 32 * 1024 * 1024
     assert OpenRouterImageEngine._select_provider_size(8064, 6048) == (1536, 1024)
-    assert OpenRouterImageEngine.maximum_total_selective_edit_ratio <= 0.08
-    assert OpenRouterImageEngine.maximum_component_edit_ratio <= 0.03
     assert ENVIRONMENT_SYSTEM_PROMPT
-    assert PROMPT_CONTRACT_VERSION == 'environment-system-v1.3'
+    assert PROMPT_CONTRACT_VERSION == 'environment-system-v1.4'
 
 
 def test_project_create_and_list():
@@ -38,3 +38,4 @@ def test_project_create_and_list():
     project_id = created.json()['id']
     listing = client.get('/api/projects').json()
     assert any(item['id'] == project_id for item in listing)
+    assert all('geometry_outpaint_mask' not in item.get('assets', {}) for item in listing)
