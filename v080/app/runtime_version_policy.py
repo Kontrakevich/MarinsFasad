@@ -7,7 +7,7 @@ _PreviousOpenRouterImageEngine = _engine_module.OpenRouterImageEngine
 
 
 class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
-    transport_engine_version = "2.7.2"
+    transport_engine_version = "2.8.0"
 
 
 _engine_module.OpenRouterImageEngine = OpenRouterImageEngine
