@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import cv2
+import numpy as np
 from PIL import Image, ImageChops, ImageFilter, ImageOps
 
 from . import ai_engine as _engine_module
@@ -16,12 +18,22 @@ AIEngineError = _engine_module.AIEngineError
 class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
     """Точечное редактирование с неизменяемой базой и единственной моделью Nano Banana."""
 
-    transport_engine_version = "2.7.0"
+    transport_engine_version = "2.7.1"
     required_model = "google/gemini-2.5-flash-image"
     generation_mode = "selective-edit"
+
     minimum_editable_pixels = 64
+    minimum_component_pixels = 64
     semantic_difference_threshold = 18
-    maximum_semantic_edit_ratio = 0.25
+
+    # Широкий ответ модели больше не отклоняется целиком. Из него извлекаются
+    # только компактные локальные компоненты, пока не исчерпан безопасный бюджет.
+    maximum_semantic_edit_ratio = 1.0
+    maximum_total_selective_edit_ratio = 0.08
+    maximum_component_edit_ratio = 0.03
+    maximum_component_bbox_ratio = 0.20
+    maximum_component_count = 8
+    component_padding_px = 9
     maximum_unfilled_ratio = 0.01
 
     def __init__(self) -> None:
@@ -95,9 +107,6 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
 
         editable_pixels = int(prepared.get("editable_pixels") or 0)
         if editable_pixels < self.minimum_editable_pixels:
-            # Пустая обязательная маска допустима: Nano Banana может определить
-            # локальный объект по тексту. Защита от глобального изменения работает
-            # после получения результата через maximum_semantic_edit_ratio.
             mask_policy = "prompt-localized-edit-with-empty-mandatory-mask"
         else:
             mask_policy = "mandatory-white-mask-plus-prompt-localized-edit"
@@ -115,7 +124,11 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
                 "input_reference_count": 2,
                 "full_canvas_generation": False,
                 "pixel_preservation_required": True,
-                "maximum_semantic_edit_ratio": self.maximum_semantic_edit_ratio,
+                "localization_policy": "connected-components-soft-clamp",
+                "maximum_total_selective_edit_ratio": self.maximum_total_selective_edit_ratio,
+                "maximum_component_edit_ratio": self.maximum_component_edit_ratio,
+                "maximum_component_bbox_ratio": self.maximum_component_bbox_ratio,
+                "maximum_component_count": self.maximum_component_count,
                 "semantic_difference_threshold": self.semantic_difference_threshold,
             }
         )
@@ -136,8 +149,6 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
             generated.convert("RGB"),
             approved.convert("RGB"),
         )
-        # Максимум по каналам лучше отделяет реальное изменение объекта от
-        # незначительного цветового шума ресэмплинга.
         red, green, blue = difference.split()
         maximum = ImageChops.lighter(ImageChops.lighter(red, green), blue)
         changed = maximum.point(
@@ -160,6 +171,165 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
             "semantic_edit_pixels": semantic_pixels,
             "semantic_available_pixels": available_pixels,
             "semantic_edit_ratio": round(semantic_ratio, 6),
+        }
+
+    def _build_selective_edit_mask(
+        self,
+        semantic_mask: Image.Image,
+        mandatory_mask: Image.Image,
+    ) -> tuple[Image.Image, dict[str, Any]]:
+        """Извлекает компактные локальные изменения и подавляет глобальную перерисовку."""
+        semantic = semantic_mask.convert("L").point(
+            lambda value: 255 if value >= 128 else 0,
+            mode="L",
+        )
+        mandatory = mandatory_mask.convert("L").point(
+            lambda value: 255 if value >= 128 else 0,
+            mode="L",
+        )
+
+        semantic_array = np.asarray(semantic, dtype=np.uint8)
+        semantic_array = cv2.morphologyEx(
+            semantic_array,
+            cv2.MORPH_OPEN,
+            np.ones((3, 3), dtype=np.uint8),
+            iterations=1,
+        )
+        semantic_array = cv2.morphologyEx(
+            semantic_array,
+            cv2.MORPH_CLOSE,
+            np.ones((5, 5), dtype=np.uint8),
+            iterations=1,
+        )
+
+        labels_count, labels, stats, _ = cv2.connectedComponentsWithStats(
+            semantic_array,
+            connectivity=8,
+        )
+        height, width = semantic_array.shape
+        total_pixels = max(1, width * height)
+        semantic_budget = max(
+            self.minimum_component_pixels,
+            int(total_pixels * self.maximum_total_selective_edit_ratio),
+        )
+
+        candidates: list[dict[str, Any]] = []
+        for label_index in range(1, labels_count):
+            x, y, box_width, box_height, area = [
+                int(value) for value in stats[label_index]
+            ]
+            if area < self.minimum_component_pixels:
+                continue
+
+            area_ratio = area / float(total_pixels)
+            bbox_pixels = box_width * box_height
+            bbox_ratio = bbox_pixels / float(total_pixels)
+            compactness = area / float(max(1, bbox_pixels))
+
+            if area_ratio > self.maximum_component_edit_ratio:
+                continue
+            if bbox_ratio > self.maximum_component_bbox_ratio:
+                continue
+
+            candidates.append(
+                {
+                    "label": label_index,
+                    "area": area,
+                    "area_ratio": area_ratio,
+                    "bbox_ratio": bbox_ratio,
+                    "compactness": compactness,
+                    "x": x,
+                    "y": y,
+                    "width": box_width,
+                    "height": box_height,
+                }
+            )
+
+        # Сначала берём наиболее содержательные и компактные локальные изменения.
+        candidates.sort(
+            key=lambda item: (
+                item["area"] * max(0.1, item["compactness"]),
+                item["area"],
+            ),
+            reverse=True,
+        )
+
+        selected = np.zeros_like(semantic_array, dtype=np.uint8)
+        kept_components: list[dict[str, Any]] = []
+        remaining_budget = semantic_budget
+
+        padding = max(0, int(self.component_padding_px))
+        if padding:
+            kernel_size = padding * 2 + 1
+            padding_kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE,
+                (kernel_size, kernel_size),
+            )
+        else:
+            padding_kernel = None
+
+        for item in candidates:
+            if len(kept_components) >= self.maximum_component_count:
+                break
+            if remaining_budget <= 0:
+                break
+
+            component = np.where(labels == item["label"], 255, 0).astype(np.uint8)
+            padded = (
+                cv2.dilate(component, padding_kernel, iterations=1)
+                if padding_kernel is not None
+                else component
+            )
+            padded = np.where(selected > 0, 0, padded).astype(np.uint8)
+            padded_pixels = int(np.count_nonzero(padded))
+
+            selected_component = padded
+            selected_pixels = padded_pixels
+            if selected_pixels > remaining_budget:
+                unpadded = np.where(selected > 0, 0, component).astype(np.uint8)
+                unpadded_pixels = int(np.count_nonzero(unpadded))
+                if unpadded_pixels > remaining_budget:
+                    continue
+                selected_component = unpadded
+                selected_pixels = unpadded_pixels
+
+            if selected_pixels <= 0:
+                continue
+
+            selected = np.maximum(selected, selected_component)
+            remaining_budget -= selected_pixels
+            kept_components.append(
+                {
+                    "x": item["x"],
+                    "y": item["y"],
+                    "width": item["width"],
+                    "height": item["height"],
+                    "source_pixels": item["area"],
+                    "selected_pixels": selected_pixels,
+                    "compactness": round(item["compactness"], 6),
+                }
+            )
+
+        selected_mask = Image.fromarray(selected, mode="L")
+        final_mask = ImageChops.lighter(mandatory, selected_mask)
+
+        mandatory_pixels = self._pixel_count(mandatory)
+        selected_pixels = self._pixel_count(selected_mask)
+        final_pixels = self._pixel_count(final_mask)
+        raw_semantic_pixels = self._pixel_count(semantic)
+
+        return final_mask, {
+            "localization_policy": "connected-components-soft-clamp",
+            "semantic_component_candidates": len(candidates),
+            "kept_component_count": len(kept_components),
+            "kept_components": kept_components,
+            "semantic_budget_pixels": semantic_budget,
+            "selected_semantic_pixels": selected_pixels,
+            "suppressed_semantic_pixels": max(0, raw_semantic_pixels - selected_pixels),
+            "mandatory_edit_pixels": mandatory_pixels,
+            "final_edit_pixels": final_pixels,
+            "final_edit_ratio": round(final_pixels / float(total_pixels), 6),
+            "global_generation_suppressed": raw_semantic_pixels > selected_pixels,
         }
 
     @staticmethod
@@ -234,23 +404,18 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
             approved_rgb,
             mandatory_mask,
         )
-        if semantic["semantic_edit_ratio"] > self.maximum_semantic_edit_ratio:
-            raise AIEngineError(
-                "Nano Banana попыталась изменить слишком большую часть исходного изображения. Результат отклонён, исходник сохранён.",
-                details={
-                    "reason": "semantic_edit_area_too_large",
-                    "maximum_semantic_edit_ratio": self.maximum_semantic_edit_ratio,
-                    **semantic,
-                    "provider_output": str(provider_output),
-                    "generated_diagnostic": str(generated_path),
-                    "transport": prepared,
-                },
-            )
+        raw_semantic_mask_path = output_dir / "raw-semantic-change-mask.png"
+        semantic_mask.save(raw_semantic_mask_path, format="PNG", optimize=False)
 
-        final_edit_mask = ImageChops.lighter(mandatory_mask, semantic_mask)
+        final_edit_mask, localized = self._build_selective_edit_mask(
+            semantic_mask,
+            mandatory_mask,
+        )
         final_mask_path = output_dir / "final-edit-mask.png"
         final_edit_mask.save(final_mask_path, format="PNG", optimize=False)
 
+        # Главный контракт: итог всегда строится поверх утверждённого исходника.
+        # Вне финальной локальной маски берутся исходные пиксели без изменений.
         candidate = Image.composite(generated_master, approved_rgb, final_edit_mask)
         candidate_path = output_dir / "candidate.png"
         candidate.save(candidate_path, format="PNG", optimize=False)
@@ -288,8 +453,6 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
                 },
             )
 
-        final_edit_pixels = self._pixel_count(final_edit_mask)
-        total_pixels = width * height
         return {
             "candidate": str(candidate_path),
             "environment_master": str(generated_path),
@@ -308,12 +471,12 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
             "approved_geometry_used_as_immutable_base": True,
             "generation_mode": self.generation_mode,
             "provider_model": self.required_model,
+            "raw_semantic_change_mask": str(raw_semantic_mask_path),
             "final_edit_mask": str(final_mask_path),
-            "final_edit_pixels": final_edit_pixels,
-            "final_edit_ratio": round(final_edit_pixels / float(max(1, total_pixels)), 6),
             "outside_changed_pixels": outside_changed_pixels,
             "pixel_preservation_verified": outside_changed_pixels == 0,
             **semantic,
+            **localized,
             **unfilled,
         }
 
