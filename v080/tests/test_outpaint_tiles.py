@@ -5,10 +5,10 @@ from app.ai_engine import OpenRouterImageEngine
 
 def test_long_thin_missing_region_is_split_into_zoomed_tiles():
     engine = OpenRouterImageEngine()
-    mask = Image.new("L", (1600, 1000), 0)
-    mask.paste(255, (0, 0, 1600, 42))
+    plan = Image.new("L", (1600, 1000), 0)
+    plan.paste(255, (0, 0, 1600, 42))
 
-    tiles = engine._component_tile_boxes(mask)
+    tiles = engine._component_tile_boxes(plan)
 
     assert 2 <= len(tiles) <= engine.outpaint_tile_max_calls
     assert all(tile["mask_pixels"] >= engine.outpaint_tile_min_pixels for tile in tiles)
@@ -20,13 +20,13 @@ def test_long_thin_missing_region_is_split_into_zoomed_tiles():
 def test_connected_border_ring_is_separated_by_side():
     engine = OpenRouterImageEngine()
     width, height = 1600, 1000
-    mask = Image.new("L", (width, height), 0)
-    mask.paste(255, (0, 0, width, 35))
-    mask.paste(255, (0, height - 45, width, height))
-    mask.paste(255, (0, 0, 55, height))
-    mask.paste(255, (width - 65, 0, width, height))
+    plan = Image.new("L", (width, height), 0)
+    plan.paste(255, (0, 0, width, 35))
+    plan.paste(255, (0, height - 45, width, height))
+    plan.paste(255, (0, 0, 55, height))
+    plan.paste(255, (width - 65, 0, width, height))
 
-    tiles = engine._component_tile_boxes(mask)
+    tiles = engine._component_tile_boxes(plan)
 
     assert 4 <= len(tiles) <= 8
     assert any(tile["grid_row"] == 0 for tile in tiles)
@@ -50,10 +50,10 @@ def test_missing_region_marker_is_opaque_and_not_white():
 
 def test_placeholder_analysis_rejects_solid_white_and_accepts_scene_texture():
     engine = OpenRouterImageEngine()
-    mask = Image.new("L", (160, 120), 255)
+    plan = Image.new("L", (160, 120), 255)
 
     white = Image.new("RGB", (160, 120), (255, 255, 255))
-    _, white_stats = engine._placeholder_analysis(white, mask)
+    _, white_stats = engine._placeholder_analysis(white, plan)
     assert white_stats["outpaint_reconstructed"] is False
     assert white_stats["placeholder_component_count"] >= 1
 
@@ -66,17 +66,18 @@ def test_placeholder_analysis_rejects_solid_white_and_accepts_scene_texture():
                 95 + (y % 41),
                 120 + ((x + y) % 53),
             )
-    _, texture_stats = engine._placeholder_analysis(textured, mask)
+    _, texture_stats = engine._placeholder_analysis(textured, plan)
     assert texture_stats["outpaint_reconstructed"] is True
     assert texture_stats["placeholder_component_count"] == 0
 
 
-def test_tile_prompt_keeps_original_operator_prompt():
+def test_tile_prompt_keeps_original_operator_prompt_without_project_mask_language():
     engine = OpenRouterImageEngine()
     original = "Убрать только белый автомобиль справа и продолжить покрытие парковки."
     prompt = engine._tile_prompt(original, 1)
 
     assert original in prompt
-    assert "WHITE pixels are the only editable pixels" in prompt
+    assert "service pattern" in prompt
+    assert "Preserve every existing photographic pixel" in prompt
     assert "Do not return white, black, transparent" in prompt
-    assert "Do not change any black-mask pixel" in prompt
+    assert "mask" not in prompt.lower()
