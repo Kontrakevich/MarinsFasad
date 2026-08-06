@@ -21,7 +21,6 @@ class PromptContext:
     history: list[str] = field(default_factory=list)
     comments: list[str] = field(default_factory=list)
     approved_geometry_asset: str = ""
-    approved_mask_asset: str = ""
     contract_version: str = ""
 
 
@@ -35,7 +34,7 @@ class PromptEngine:
             )
         return (
             "1. Не вносить дополнительных смысловых изменений. "
-            "Только естественно заполнить обязательные пустые области маски."
+            "Выполнить естественный outpaint всех отсутствующих участков окружения."
         )
 
     def compile(self, context: PromptContext, project_dir: Path) -> dict:
@@ -52,20 +51,16 @@ class PromptEngine:
         )
         system_sha256 = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
 
+        operator_prompt = self._operator_prompt(context.comments)
+        operator_prompt_sha256 = hashlib.sha256(
+            operator_prompt.encode("utf-8")
+        ).hexdigest()
+
         if is_environment:
-            operator_prompt = self._operator_prompt(context.comments)
-            operator_prompt_sha256 = hashlib.sha256(
-                operator_prompt.encode("utf-8")
-            ).hexdigest()
             approved_base = (
                 context.approved_geometry_asset
-                or "Reference image 1 supplied by the pipeline"
+                or "Approved corrected geometry image supplied by the pipeline"
             )
-            edit_map = (
-                context.approved_mask_asset
-                or "Reference image 2 supplied by the pipeline"
-            )
-
             sections = [
                 (
                     OPERATOR_PROMPT_MARKER,
@@ -75,44 +70,36 @@ class PromptEngine:
                     "PRIMARY EXECUTION PRIORITY",
                     (
                         "Execute every operator instruction above visibly and precisely.\n"
-                        "The operator prompt is the primary generation task.\n"
-                        "Mandatory outpaint completion is secondary and must not replace, weaken or hide the requested changes.\n"
-                        "Do not return a result that only fills the mask while ignoring the operator prompt."
+                        "The operator prompt is the primary editing task.\n"
+                        "Automatic outpaint completion must also be performed wherever the approved geometry has no visual information.\n"
+                        "Do not ignore the operator prompt and do not replace it with a generic full-frame regeneration."
                     ),
                 ),
                 (
                     "APPROVED IMMUTABLE BASE",
                     (
                         f"{approved_base}\n"
-                        "Use the corrected and approved immutable base as reference image 1.\n"
-                        "Preserve all unaffected content pixel-for-pixel in final compositing."
+                        "This corrected geometry image is the only approved project input.\n"
+                        "Preserve all existing visible content pixel-for-pixel during final compositing."
                     ),
                 ),
                 (
-                    "MISSING INFORMATION ENCODING",
+                    "AUTOMATIC OUTPAINT",
                     (
-                        "In reference image 1, every missing or transparent pixel is converted into an opaque magenta/cyan checkerboard service marker.\n"
-                        "The checkerboard is not part of the photographed scene and must never appear in the result.\n"
-                        "Reconstruct every marked pixel as a photorealistic continuation of the adjacent sky, buildings, pavement, ground and urban environment.\n"
-                        "A solid white, solid black, transparent, checkerboard or flat-color wedge is not reconstruction and is invalid."
+                        "The application automatically detects every transparent or missing area created by perspective correction.\n"
+                        "These missing areas are marked inside the supplied geometry image only as a service signal for reconstruction.\n"
+                        "They are not part of the photograph. Reconstruct them as a seamless photorealistic continuation of the adjacent scene.\n"
+                        "Continue sky, buildings, facade edges, pavement, asphalt, ground, shadows, wires, vegetation and perspective as appropriate.\n"
+                        "Never leave white, black, transparent, checkerboard or flat-colour wedges."
                     ),
                 ),
                 (
-                    "EDIT REFERENCE",
+                    "SELECTIVE IMAGE EDITING",
                     (
-                        f"{edit_map}\n"
-                        "Reference image 2 is the aligned edit map. White areas are mandatory outpaint areas. "
-                        "Black areas are protected except for exact local targets explicitly named by the operator."
-                    ),
-                ),
-                (
-                    "SELECTIVE IMAGE EDITING ONLY",
-                    (
-                        "Use Nano Banana for selective image editing only.\n"
-                        "Modify the exact objects, materials or areas named by the operator.\n"
-                        "Do not regenerate, redesign, recolor or relight the complete frame.\n"
-                        "Every unaffected pixel must remain identical after final compositing.\n"
-                        "Keep the approved camera, geometry, perspective, framing and dimensions."
+                        "Use Nano Banana to perform the exact local changes named by the operator.\n"
+                        "Do not regenerate, redesign, recolour or relight the complete frame.\n"
+                        "Keep the approved camera, geometry, framing and dimensions.\n"
+                        "Everything not explicitly requested and not missing must remain unchanged."
                     ),
                 ),
                 (
@@ -136,16 +123,12 @@ class PromptEngine:
                     FINAL_COMMAND_MARKER,
                     (
                         f"{operator_prompt}\n\n"
-                        "Perform these exact changes now. Reconstruct all checkerboard or masked missing areas with real scene content. "
-                        "Preserve everything else. A result that ignores any operator instruction or leaves blank wedges is invalid."
+                        "Perform these exact changes now. Complete all automatically detected missing surroundings with real scene content. "
+                        "Preserve everything else. A result that ignores the operator instruction or leaves blank wedges is invalid."
                     ),
                 ),
             ]
         else:
-            operator_prompt = self._operator_prompt(context.comments)
-            operator_prompt_sha256 = hashlib.sha256(
-                operator_prompt.encode("utf-8")
-            ).hexdigest()
             sections = [
                 ("SYSTEM PROMPT — AUTHORITATIVE", system_prompt),
                 ("PROMPT CONTRACT", contract_version),
@@ -189,12 +172,11 @@ class PromptEngine:
             "system_prompt_sha256": system_sha256,
             "contract_version": contract_version,
             "approved_geometry_asset": context.approved_geometry_asset,
-            "approved_mask_asset": context.approved_mask_asset,
             "operator_comment_count": len(context.comments),
-            "generation_mode": "selective-edit" if is_environment else "stage-default",
-            "mask_role": "mandatory-edit-reference" if is_environment else "stage-default",
+            "generation_mode": "automatic-outpaint-and-selective-edit" if is_environment else "stage-default",
+            "outpaint_detection": "automatic-from-approved-geometry" if is_environment else "stage-default",
             "provider_model": "google/gemini-2.5-flash-image" if is_environment else "stage-default",
-            "pixel_preservation": "outside-edit-area-exact" if is_environment else "stage-default",
+            "pixel_preservation": "existing-visible-pixels-exact" if is_environment else "stage-default",
             "prompt_transport_policy": "ui-compiled-prompt-sent-verbatim" if is_environment else "stage-default",
-            "missing_region_policy": "opaque-marker-must-be-photorealistically-reconstructed" if is_environment else "stage-default",
+            "missing_region_policy": "automatically-detected-and-photorealistically-reconstructed" if is_environment else "stage-default",
         }
