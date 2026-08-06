@@ -15,13 +15,15 @@ def test_health():
     assert payload['runtime'] == 'standalone-v080'
     assert payload['transport_policy'] == 'provider-aware-temporary-copy'
     assert payload['generation_mode'] == 'background-job-polling'
-    assert OpenRouterImageEngine.transport_engine_version == '2.6.0'
+    assert payload['image_model'] == 'google/gemini-2.5-flash-image'
+    assert OpenRouterImageEngine.transport_engine_version == '2.7.0'
+    assert OpenRouterImageEngine.required_model == 'google/gemini-2.5-flash-image'
+    assert OpenRouterImageEngine.generation_mode == 'selective-edit'
     assert OpenRouterImageEngine.default_transmit_max_request_bytes == 32 * 1024 * 1024
     assert OpenRouterImageEngine._select_provider_size(8064, 6048) == (1536, 1024)
-    assert OpenRouterImageEngine.minimum_full_frame_change_ratio > 0
-    assert OpenRouterImageEngine.minimum_non_mask_change_ratio > 0
+    assert OpenRouterImageEngine.maximum_semantic_edit_ratio <= 0.25
     assert ENVIRONMENT_SYSTEM_PROMPT
-    assert PROMPT_CONTRACT_VERSION == 'environment-system-v1.2'
+    assert PROMPT_CONTRACT_VERSION == 'environment-system-v1.3'
 
 
 def test_project_create_and_list():
