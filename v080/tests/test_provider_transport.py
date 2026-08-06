@@ -25,6 +25,34 @@ def test_provider_size_selection_matches_master_orientation():
     assert OpenRouterImageEngine._select_provider_size(4096, 4096) == (1024, 1024)
 
 
+def test_effective_mask_unites_white_mask_and_transparent_geometry(tmp_path):
+    geometry = tmp_path / "geometry.png"
+    approved_mask = tmp_path / "approved-mask.png"
+    effective_mask = tmp_path / "effective-mask.png"
+
+    image = Image.new("RGBA", (32, 16), (10, 20, 30, 255))
+    for x in range(28, 32):
+        for y in range(16):
+            image.putpixel((x, y), (0, 0, 0, 0))
+    image.save(geometry, format="PNG")
+
+    mask = Image.new("L", (32, 16), 0)
+    mask.paste(255, (0, 0, 4, 16))
+    mask.save(approved_mask, format="PNG")
+
+    OpenRouterImageEngine._effective_edit_mask(
+        geometry,
+        approved_mask,
+        effective_mask,
+    )
+
+    with Image.open(effective_mask) as result:
+        result = result.convert("L")
+        assert result.getpixel((1, 8)) == 255
+        assert result.getpixel((15, 8)) == 0
+        assert result.getpixel((30, 8)) == 255
+
+
 def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     geometry = tmp_path / "geometry.png"
     mask = tmp_path / "mask.png"
@@ -69,8 +97,12 @@ def test_transport_fits_limit_without_changing_masters(tmp_path, monkeypatch):
     assert result["source_contract"] == "corrected-approved-geometry"
     assert result["system_prompt_in_request"] is True
     assert result["system_prompt_contract"] == PROMPT_CONTRACT_VERSION
+    assert result["full_canvas_generation"] is True
+    assert result["mask_policy"] == "white-mask-or-transparent-geometry-generate"
     assert result["approved_geometry_sha256"]
     assert result["approved_mask_sha256"]
+    assert result["effective_mask_sha256"]
+    assert Path(result["effective_mask_path"]).is_file()
     assert geometry.read_bytes() == geometry_before
     assert mask.read_bytes() == mask_before
 
@@ -107,7 +139,7 @@ def test_payload_contains_system_prompt_and_two_approved_references(tmp_path):
     assert payload["input_references"][1]["image_url"]["url"].startswith("data:image/")
 
 
-def test_empty_mask_blocks_provider_preflight_before_credits(tmp_path):
+def test_empty_effective_mask_blocks_provider_preflight_before_credits(tmp_path):
     geometry = tmp_path / "geometry.png"
     mask = tmp_path / "empty-mask.png"
     make_geometry(geometry, (320, 240))
@@ -125,7 +157,7 @@ def test_empty_mask_blocks_provider_preflight_before_credits(tmp_path):
 
     assert captured.value.details["provider_call_made"] is False
     assert captured.value.details["credits_spent"] is False
-    assert captured.value.details["reason"] == "empty_outpaint_mask"
+    assert captured.value.details["reason"] == "empty_effective_edit_mask"
 
 
 def test_provider_output_is_remapped_and_geometry_is_preserved(tmp_path):
@@ -148,6 +180,7 @@ def test_provider_output_is_remapped_and_geometry_is_preserved(tmp_path):
             "height": 1,
         },
         "approved_geometry_sha256": "test",
+        "effective_mask_path": str(mask),
     }
     result = OpenRouterImageEngine()._promote_provider_output(
         provider_output=provider,
@@ -160,6 +193,7 @@ def test_provider_output_is_remapped_and_geometry_is_preserved(tmp_path):
     )
 
     with Image.open(result["candidate"]) as candidate:
+        assert candidate.mode == "RGB"
         assert candidate.size == (8, 6)
         assert candidate.getpixel((3, 3)) == (10, 20, 30)
         assert candidate.getpixel((0, 3)) == (200, 100, 50)
@@ -167,6 +201,7 @@ def test_provider_output_is_remapped_and_geometry_is_preserved(tmp_path):
     assert result["remapped_to_master"] is True
     assert result["approved_geometry_preserved"] is True
     assert result["meaningful_generation"] is True
+    assert result["full_canvas_generation"] is True
 
 
 def test_prepared_request_content_length_is_exact():
@@ -175,7 +210,7 @@ def test_prepared_request_content_length_is_exact():
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "2.4.0"
+    assert prepared.headers["X-Marins-Transport-Engine"] == "2.5.0"
     assert prepared.headers["X-Marins-Request-Bytes"] == str(len(body))
 
 
