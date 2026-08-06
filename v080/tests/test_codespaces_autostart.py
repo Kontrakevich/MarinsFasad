@@ -34,8 +34,7 @@ def test_v080_start_synchronizes_current_ui() -> None:
     assert 'ui_single_window/styles.css' in start
     assert 'ui_single_window/app-v080.js' in start
     assert 'rm -f /tmp/marins-facade-v060.pid' in start
-    assert 'Edit mode: exact local changes with soft-clamped delta compositing' in start
-    assert 'Base image: pixel-preserved outside final edit area' in start
-    assert 'Missing regions: opaque service marker' in start
-    assert 'Outpaint reconstruction: one automatic Nano Banana correction attempt' in start
-    assert 'Solid white wedges: rejected as non-generated content' in start
+    assert 'Edit mode: exact local changes with pixel preservation' in start
+    assert 'Missing regions: split into zoomed context tiles' in start
+    assert 'Outpaint reconstruction: Nano Banana processes every tile separately' in start
+    assert 'Tile compositing: original mask only; unaffected pixels are preserved' in start
