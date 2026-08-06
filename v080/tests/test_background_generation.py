@@ -1,8 +1,8 @@
-import threading
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.main import _generation_jobs, _generation_jobs_lock, app, projects
 
 
@@ -31,7 +31,13 @@ def test_generation_start_returns_202_without_waiting_for_provider(monkeypatch):
     state["master_canvas"] = {"width": 1200, "height": 900}
     projects.write(project_id, state)
 
-    monkeypatch.setattr(threading.Thread, "start", lambda self: None)
+    # Подменяем только целевую функцию фоновой генерации. Нельзя подменять
+    # threading.Thread.start глобально: TestClient сам использует потоки.
+    monkeypatch.setattr(
+        main_module,
+        "_run_environment_generation",
+        lambda project_id, job_id: None,
+    )
     with _generation_jobs_lock:
         _generation_jobs.pop(project_id, None)
 
