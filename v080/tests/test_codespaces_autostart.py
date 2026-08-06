@@ -27,7 +27,7 @@ def test_legacy_codespaces_launchers_redirect_to_v080() -> None:
 
 def test_v080_start_synchronizes_current_ui() -> None:
     start = (REPO_ROOT / "v080" / "start.sh").read_text("utf-8")
-    assert 'EXPECTED_TRANSPORT_ENGINE="2.7.2"' in start
+    assert 'EXPECTED_TRANSPORT_ENGINE="2.7.1"' in start
     assert 'EXPECTED_PROMPT_CONTRACT="environment-system-v1.3"' in start
     assert 'EXPECTED_MODEL="google/gemini-2.5-flash-image"' in start
     assert 'ui_single_window/index.html' in start
@@ -36,5 +36,6 @@ def test_v080_start_synchronizes_current_ui() -> None:
     assert 'rm -f /tmp/marins-facade-v060.pid' in start
     assert 'Edit mode: exact local changes with soft-clamped delta compositing' in start
     assert 'Base image: pixel-preserved outside final edit area' in start
-    assert 'Global regeneration: suppressed instead of rejected' in start
-    assert 'Outpaint QC: warning-only; it never cancels a prompt-driven result' in start
+    assert 'Missing regions: opaque service marker' in start
+    assert 'Outpaint reconstruction: one automatic Nano Banana correction attempt' in start
+    assert 'Solid white wedges: rejected as non-generated content' in start
