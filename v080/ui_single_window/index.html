@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Marins Facade — Workspace v0.8.0</title>
-  <link rel="stylesheet" href="/static/styles.css?v=ui-lift-0803">
+  <link rel="stylesheet" href="/static/styles.css?v=stage-workspace-0804">
 </head>
 <body>
 <div class="app-shell">
@@ -64,11 +64,11 @@
         </div>
 
         <div class="viewer-toolbar">
-          <div class="mode-tabs" role="tablist">
+          <div class="mode-tabs" role="tablist" aria-label="Представления активного этапа">
             <button data-view="original">ОРИГИНАЛ</button>
-            <button data-view="grid" class="active">СЕТКА</button>
+            <button data-view="grid">СЕТКА</button>
             <button data-view="result">РЕЗУЛЬТАТ</button>
-            <button data-view="overlay">OVERLAY</button>
+            <button data-view="generation">ГЕНЕРАЦИЯ</button>
             <button data-view="split">SPLIT</button>
           </div>
           <div class="zoom-tools">
@@ -95,14 +95,9 @@
             <div class="grid-legend"><span><i class="legend-dot"></i>4 точки главной плоскости фасада</span><span>Двойной щелчок — сброс</span></div>
           </div>
 
-          <div id="overlay-view" class="overlay-view hidden">
-            <img id="overlay-base" alt="Исходник"><img id="overlay-result" alt="Результат">
-            <label>ПРОЗРАЧНОСТЬ <input id="overlay-range" type="range" min="0" max="100" value="50"></label>
-          </div>
-
           <div id="split-view" class="split-view hidden">
-            <figure><figcaption>ИСХОДНИК</figcaption><img id="split-before" alt="Исходник"></figure>
-            <figure><figcaption>РЕЗУЛЬТАТ</figcaption><img id="split-after" alt="Результат"></figure>
+            <figure><figcaption id="split-before-label">ОРИГИНАЛ</figcaption><img id="split-before" alt="Предыдущее изображение"></figure>
+            <figure><figcaption id="split-after-label">РЕЗУЛЬТАТ</figcaption><img id="split-after" alt="Текущее изображение"></figure>
           </div>
         </div>
 
@@ -176,6 +171,6 @@
 </div>
 
 <div id="error-modal" class="modal hidden"><div class="modal-card"><p class="eyebrow">ОШИБКА</p><h3 id="error-title">Операция не выполнена</h3><pre id="error-text"></pre><button id="error-close" class="button button-primary">Закрыть</button></div></div>
-<script src="/static/app-v080.js?v=ui-lift-0803"></script>
+<script src="/static/app-v080.js?v=stage-workspace-0804"></script>
 </body>
 </html>
