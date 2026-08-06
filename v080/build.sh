@@ -16,6 +16,7 @@ grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
 grep -q 'background-job-polling' "$ROOT/app/main.py"
 grep -q 'google/gemini-2.5-flash-image' "$ROOT/app/selective_policy.py"
 grep -q 'connected-components-soft-clamp' "$ROOT/app/selective_policy.py"
+grep -q 'non-blocking-connected-components-warning' "$ROOT/app/outpaint_qc_policy.py"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$ROOT" -type f -name '*.pyc' -delete
@@ -57,7 +58,7 @@ from app.system_prompts import PROMPT_CONTRACT_VERSION
 
 os.environ["OPENROUTER_IMAGE_MODEL"] = "must-be-ignored/test-model"
 engine = OpenRouterImageEngine()
-assert OpenRouterImageEngine.transport_engine_version == "2.7.1"
+assert OpenRouterImageEngine.transport_engine_version == "2.7.2"
 assert engine.model == "google/gemini-2.5-flash-image"
 assert engine.required_model == "google/gemini-2.5-flash-image"
 assert engine.generation_mode == "selective-edit"
@@ -68,13 +69,16 @@ assert health()["generation_mode"] == "background-job-polling"
 assert engine.maximum_total_selective_edit_ratio <= 0.08
 assert engine.maximum_component_edit_ratio <= 0.03
 assert engine.maximum_component_bbox_ratio <= 0.20
+assert engine.outpaint_qc_blocking is False
+assert engine.outpaint_qc_policy == "non-blocking-connected-components-warning"
 print(
     f"Transport engine {OpenRouterImageEngine.transport_engine_version}; "
     f"model {engine.model}; "
     f"prompt contract {PROMPT_CONTRACT_VERSION}; "
     "background generation polling active; "
     "soft-clamped selective edits active; "
+    "outpaint QC warning-only; "
     "pixel preservation outside edit area active"
 )
 PY
-echo "Marins Facade v0.8.0 Nano Banana selective soft-clamp build passed"
+echo "Marins Facade v0.8.0 Nano Banana selective-edit build passed"
