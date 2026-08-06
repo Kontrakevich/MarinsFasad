@@ -66,9 +66,6 @@ class PromptEngine:
                 or "Reference image 2 supplied by the pipeline"
             )
 
-            # The operator instruction is deliberately placed first and repeated
-            # as the final command. This exact text is shown in the UI and sent to
-            # Nano Banana without any later rewriting.
             sections = [
                 (
                     OPERATOR_PROMPT_MARKER,
@@ -89,6 +86,15 @@ class PromptEngine:
                         f"{approved_base}\n"
                         "Use the corrected and approved immutable base as reference image 1.\n"
                         "Preserve all unaffected content pixel-for-pixel in final compositing."
+                    ),
+                ),
+                (
+                    "MISSING INFORMATION ENCODING",
+                    (
+                        "In reference image 1, every missing or transparent pixel is converted into an opaque magenta/cyan checkerboard service marker.\n"
+                        "The checkerboard is not part of the photographed scene and must never appear in the result.\n"
+                        "Reconstruct every marked pixel as a photorealistic continuation of the adjacent sky, buildings, pavement, ground and urban environment.\n"
+                        "A solid white, solid black, transparent, checkerboard or flat-color wedge is not reconstruction and is invalid."
                     ),
                 ),
                 (
@@ -130,8 +136,8 @@ class PromptEngine:
                     FINAL_COMMAND_MARKER,
                     (
                         f"{operator_prompt}\n\n"
-                        "Perform these exact changes now. Preserve everything else. "
-                        "A result that ignores any operator instruction is invalid."
+                        "Perform these exact changes now. Reconstruct all checkerboard or masked missing areas with real scene content. "
+                        "Preserve everything else. A result that ignores any operator instruction or leaves blank wedges is invalid."
                     ),
                 ),
             ]
@@ -190,4 +196,5 @@ class PromptEngine:
             "provider_model": "google/gemini-2.5-flash-image" if is_environment else "stage-default",
             "pixel_preservation": "outside-edit-area-exact" if is_environment else "stage-default",
             "prompt_transport_policy": "ui-compiled-prompt-sent-verbatim" if is_environment else "stage-default",
+            "missing_region_policy": "opaque-marker-must-be-photorealistically-reconstructed" if is_environment else "stage-default",
         }
