@@ -38,11 +38,13 @@ fi
 
 cd "$ROOT"
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
-sed -i 's/ui-lift-0803/ui-fullframe-0806/g' "$ROOT/app/web/index.html"
-sed -i 's/ui-async-0804/ui-fullframe-0806/g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
 cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" > "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
+
+grep -q 'resilient-fullframe-0806' "$ROOT/app/web/index.html"
+grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
+grep -q 'background-job-polling' "$ROOT/app/main.py"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$ROOT" -type f -name '*.pyc' -delete
@@ -75,7 +77,8 @@ if health().get("generation_mode") != "background-job-polling":
 print(f"Transport engine {actual} verified")
 print(f"OpenRouter transmit ceiling: {engine.transmit_max_request_bytes} bytes")
 print(f"System prompt contract: {PROMPT_CONTRACT_VERSION}")
-print("Generation mode: background job + browser polling")
+print("Generation mode: background job + resilient browser polling")
+print("Transient Codespaces 408/425/429/502/503/504 retries: active")
 print("Environment mode: full-frame generation from approved corrected geometry")
 print("Provider input: one approved geometry reference")
 print("Mask role: quality control only; it does not limit generation")
@@ -117,7 +120,7 @@ PY
       echo "Marins Facade v0.8.0 standalone started on port 8070 (PID $NEW_PID)"
       echo "Transport engine: $EXPECTED_TRANSPORT_ENGINE"
       echo "Prompt contract: $EXPECTED_PROMPT_CONTRACT"
-      echo "Generation mode: background job + browser polling"
+      echo "Generation mode: background job + resilient browser polling"
       echo "Environment mode: full-frame geometry-reference generation"
       cat "$HEALTH_FILE"
       exit 0
