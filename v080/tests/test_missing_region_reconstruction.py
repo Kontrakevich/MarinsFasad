@@ -25,8 +25,9 @@ def test_missing_regions_are_transmitted_as_opaque_service_markers() -> None:
     assert transport_geometry.getchannel("A").getextrema() == (255, 255)
     assert transport_mask.getpixel((2, 8)) == 255
     assert engine.missing_region_transport_policy == (
-        "opaque-chroma-marker-with-nano-banana-auto-retry"
+        "opaque-marker-plus-zoomed-nano-banana-tiles"
     )
+    assert engine.outpaint_repair_mode == "component-tiles"
 
 
 def test_solid_white_fill_is_not_accepted_as_neural_outpaint(tmp_path: Path) -> None:
