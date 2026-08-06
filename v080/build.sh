@@ -4,11 +4,13 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
-sed -i 's/ui-lift-0803/ui-fullframe-0806/g' "$ROOT/app/web/index.html"
-sed -i 's/ui-async-0804/ui-fullframe-0806/g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
 cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" > "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
+
+grep -q 'resilient-fullframe-0806' "$ROOT/app/web/index.html"
+grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
+grep -q 'background-job-polling' "$ROOT/app/main.py"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$ROOT" -type f -name '*.pyc' -delete
@@ -56,8 +58,9 @@ print(
     f"transmit ceiling {engine.transmit_max_request_bytes} bytes; "
     f"prompt contract {PROMPT_CONTRACT_VERSION}; "
     "background generation polling active; "
+    "transient Codespaces 502/503/504 retries active; "
     "full-frame geometry-reference generation active; "
     "mask is QC-only"
 )
 PY
-echo "Marins Facade v0.8.0 full-frame environment generation build passed"
+echo "Marins Facade v0.8.0 resilient full-frame environment generation build passed"
