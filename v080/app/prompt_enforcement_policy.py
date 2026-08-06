@@ -14,9 +14,10 @@ AIEngineError = _engine_module.AIEngineError
 
 
 class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
-    """Ensures the exact UI-compiled prompt is the provider prompt."""
+    """Ensures the exact UI prompt and the single approved geometry input."""
 
     prompt_transport_policy = "ui-compiled-prompt-sent-verbatim"
+    provider_input_policy = "single-approved-geometry-reference"
 
     @staticmethod
     def _clean_prompt(prompt: str) -> str:
@@ -46,9 +47,6 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
             return exact, True
         if ENVIRONMENT_SYSTEM_PROMPT in exact:
             return exact, False
-        # Compatibility for direct engine callers and isolated tests. The normal
-        # application path always supplies the UI-compiled prompt and therefore
-        # never enters this fallback.
         wrapped = (
             f"SYSTEM PROMPT — {PROMPT_CONTRACT_VERSION}\n"
             f"{ENVIRONMENT_SYSTEM_PROMPT}\n\n"
@@ -66,6 +64,8 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
         provider_size: tuple[int, int],
     ) -> dict:
         provider_prompt, _ = self._provider_prompt(prompt)
+        # The provider receives only the approved corrected geometry. Missing
+        # pixels are already encoded inside that image by the outpaint policy.
         return {
             "model": self.required_model,
             "prompt": provider_prompt,
@@ -78,10 +78,6 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
                 {
                     "type": "image_url",
                     "image_url": {"url": self._data_url(geometry_image)},
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {"url": self._data_url(outpaint_mask)},
                 },
             ],
         }
@@ -123,6 +119,8 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
         prepared.update(
             {
                 "prompt_transport_policy": self.prompt_transport_policy,
+                "provider_input_policy": self.provider_input_policy,
+                "provider_reference_count": 1,
                 "compiled_prompt_ui": ui_prompt,
                 "compiled_prompt_ui_sha256": ui_prompt_sha256,
                 "compiled_prompt_sent": provider_prompt,
@@ -220,6 +218,8 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
                 "prompt_match": ui_prompt_match,
                 "provider_prompt_match": provider_prompt_match,
                 "prompt_transport_policy": self.prompt_transport_policy,
+                "provider_input_policy": self.provider_input_policy,
+                "provider_reference_count": 1,
                 "operator_prompt_marker_present": OPERATOR_PROMPT_MARKER in ui_prompt,
                 "final_command_marker_present": FINAL_COMMAND_MARKER in ui_prompt,
                 "ui_compiled_prompt": is_ui_compiled,
