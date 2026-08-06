@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,7 @@ class ProjectEngine:
     def __init__(self, root: Path):
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
 
     def create(self, name: str) -> dict:
         slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", name.strip()).strip("-").lower() or "project"
@@ -38,30 +40,43 @@ class ProjectEngine:
         return self.read(project_id)
 
     def list(self) -> list[dict]:
-        output = []
-        for path in sorted(self.root.glob("*/project.json")):
-            try:
-                output.append(json.loads(path.read_text("utf-8")))
-            except Exception:
-                continue
-        return output
+        with self._lock:
+            output = []
+            for path in sorted(self.root.glob("*/project.json")):
+                try:
+                    output.append(json.loads(path.read_text("utf-8")))
+                except Exception:
+                    continue
+            return output
 
     def read(self, project_id: str) -> dict:
-        state = json.loads((self.path(project_id) / "project.json").read_text("utf-8"))
-        state["event_count"] = len(self.events(project_id).list())
-        return state
+        with self._lock:
+            state = json.loads((self.path(project_id) / "project.json").read_text("utf-8"))
+            state["event_count"] = len(self.events(project_id).list())
+            return state
 
     def write(self, project_id: str, state: dict) -> None:
-        state["updated_at"] = datetime.now(timezone.utc).isoformat()
-        path = self.path(project_id) / "project.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(state, ensure_ascii=False, indent=2), "utf-8")
+        with self._lock:
+            state["updated_at"] = datetime.now(timezone.utc).isoformat()
+            path = self.path(project_id) / "project.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                temporary.write_text(
+                    json.dumps(state, ensure_ascii=False, indent=2),
+                    "utf-8",
+                )
+                temporary.replace(path)
+            finally:
+                temporary.unlink(missing_ok=True)
 
     def record(self, project_id: str, event_type: str, payload: dict | None = None, *, actor: str = "user") -> dict:
-        return self.events(project_id).append(event_type, payload, actor=actor)
+        with self._lock:
+            return self.events(project_id).append(event_type, payload, actor=actor)
 
     def history(self, project_id: str, limit: int = 100) -> list[dict]:
-        return self.events(project_id).recent(limit)
+        with self._lock:
+            return self.events(project_id).recent(limit)
 
     def events(self, project_id: str) -> EventStore:
         return EventStore(self.path(project_id))
