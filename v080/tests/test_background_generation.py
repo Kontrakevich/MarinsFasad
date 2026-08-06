@@ -1,7 +1,13 @@
+import threading
 from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from app.main import _generation_jobs, _generation_jobs_lock, app, projects
 
 
 ROOT = Path(__file__).resolve().parents[1]
+client = TestClient(app)
 
 
 def test_environment_generation_uses_background_job_and_short_status_requests():
@@ -12,6 +18,33 @@ def test_environment_generation_uses_background_job_and_short_status_requests():
     assert '/environment/generation-status' in main
     assert 'generation_mode": "background-job-polling"' in main
     assert "def _run_environment_generation" in main
+
+
+def test_generation_start_returns_202_without_waiting_for_provider(monkeypatch):
+    project = projects.create("Async generation test")
+    project_id = project["id"]
+    state = projects.read(project_id)
+    state["pipeline"]["geometry"] = "approved"
+    state["pipeline"]["environment"] = "ready"
+    state["assets"]["geometry_candidate"] = "images/stages/geometry/candidate.png"
+    state["assets"]["geometry_outpaint_mask"] = "images/stages/geometry/outpaint-mask.png"
+    state["master_canvas"] = {"width": 1200, "height": 900}
+    projects.write(project_id, state)
+
+    monkeypatch.setattr(threading.Thread, "start", lambda self: None)
+    with _generation_jobs_lock:
+        _generation_jobs.pop(project_id, None)
+
+    response = client.post(f"/api/projects/{project_id}/environment/generate")
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["status"] == "queued"
+    assert payload["job_id"]
+    assert payload["status_url"].endswith("/environment/generation-status")
+
+    status = client.get(payload["status_url"])
+    assert status.status_code == 200
+    assert status.json()["status"] == "queued"
 
 
 def test_environment_generation_worker_persists_success_and_failure_states():
