@@ -15,6 +15,7 @@ grep -q 'Внесите только указанные точечные изм�
 grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
 grep -q 'background-job-polling' "$ROOT/app/main.py"
 grep -q 'google/gemini-2.5-flash-image' "$ROOT/app/selective_policy.py"
+grep -q 'connected-components-soft-clamp' "$ROOT/app/selective_policy.py"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$ROOT" -type f -name '*.pyc' -delete
@@ -56,7 +57,7 @@ from app.system_prompts import PROMPT_CONTRACT_VERSION
 
 os.environ["OPENROUTER_IMAGE_MODEL"] = "must-be-ignored/test-model"
 engine = OpenRouterImageEngine()
-assert OpenRouterImageEngine.transport_engine_version == "2.7.0"
+assert OpenRouterImageEngine.transport_engine_version == "2.7.1"
 assert engine.model == "google/gemini-2.5-flash-image"
 assert engine.required_model == "google/gemini-2.5-flash-image"
 assert engine.generation_mode == "selective-edit"
@@ -64,14 +65,16 @@ assert engine.transmit_max_request_bytes <= 32 * 1024 * 1024
 assert OpenRouterImageEngine._select_provider_size(8064, 6048) == (1536, 1024)
 assert PROMPT_CONTRACT_VERSION == "environment-system-v1.3"
 assert health()["generation_mode"] == "background-job-polling"
-assert engine.maximum_semantic_edit_ratio <= 0.25
+assert engine.maximum_total_selective_edit_ratio <= 0.08
+assert engine.maximum_component_edit_ratio <= 0.03
+assert engine.maximum_component_bbox_ratio <= 0.20
 print(
     f"Transport engine {OpenRouterImageEngine.transport_engine_version}; "
     f"model {engine.model}; "
     f"prompt contract {PROMPT_CONTRACT_VERSION}; "
     "background generation polling active; "
-    "selective edits active; "
+    "soft-clamped selective edits active; "
     "pixel preservation outside edit area active"
 )
 PY
-echo "Marins Facade v0.8.0 Nano Banana selective-edit build passed"
+echo "Marins Facade v0.8.0 Nano Banana selective soft-clamp build passed"
