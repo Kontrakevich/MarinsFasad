@@ -27,13 +27,13 @@ def test_legacy_codespaces_launchers_redirect_to_v080() -> None:
 
 def test_v080_start_synchronizes_current_ui() -> None:
     start = (REPO_ROOT / "v080" / "start.sh").read_text("utf-8")
-    assert 'EXPECTED_TRANSPORT_ENGINE="2.7.0"' in start
+    assert 'EXPECTED_TRANSPORT_ENGINE="2.7.1"' in start
     assert 'EXPECTED_PROMPT_CONTRACT="environment-system-v1.3"' in start
     assert 'EXPECTED_MODEL="google/gemini-2.5-flash-image"' in start
     assert 'ui_single_window/index.html' in start
     assert 'ui_single_window/styles.css' in start
     assert 'ui_single_window/app-v080.js' in start
     assert 'rm -f /tmp/marins-facade-v060.pid' in start
-    assert 'Edit mode: selective local changes only' in start
+    assert 'Edit mode: exact local changes with soft-clamped delta compositing' in start
     assert 'Base image: pixel-preserved outside final edit area' in start
-    assert 'Global regeneration guard: active' in start
+    assert 'Global regeneration: suppressed instead of rejected' in start
