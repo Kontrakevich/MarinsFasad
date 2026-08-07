@@ -41,10 +41,11 @@ def test_nano_banana_and_geometry_only_contract_are_hard_locked(monkeypatch):
     engine = OpenRouterImageEngine()
     assert engine.model == NANO_BANANA
     assert engine.required_model == NANO_BANANA
-    assert engine.transport_engine_version == "2.9.0"
+    assert engine.transport_engine_version == "2.9.1"
     assert engine.environment_input_policy == "approved-geometry-only"
     assert engine.outpaint_detection_policy == "automatic-from-approved-geometry-transparency"
     assert engine.user_mask_required is False
+    assert engine.internal_outpaint_tiles_allowed is True
     assert engine.provider_input_policy == "single-approved-geometry-reference"
 
 
@@ -132,7 +133,7 @@ def test_prepared_request_content_length_is_exact():
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "2.9.0"
+    assert prepared.headers["X-Marins-Transport-Engine"] == "2.9.1"
 
 
 def test_extract_openrouter_limits_and_supported_sizes():
