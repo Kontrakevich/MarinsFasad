@@ -3,6 +3,7 @@ from pathlib import Path
 from PIL import Image
 
 from app.ai_engine import OpenRouterImageEngine
+from app.prompt_engine import GENERATION_MODE_MARKER
 from app.system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
 
 
@@ -32,17 +33,20 @@ def capabilities(engine):
     }
 
 
-def test_nano_banana_and_geometry_only_contract_are_hard_locked(monkeypatch):
+def test_nano_banana_and_hybrid_contract_are_hard_locked(monkeypatch):
     monkeypatch.setenv("OPENROUTER_IMAGE_MODEL", "openai/gpt-image-1")
     engine = OpenRouterImageEngine()
     assert engine.model == NANO_BANANA
     assert engine.required_model == NANO_BANANA
-    assert engine.transport_engine_version == "3.0.0"
+    assert engine.transport_engine_version == "3.1.0"
+    assert engine.default_generation_mode == "hybrid"
+    assert engine.available_generation_modes == ("hybrid", "edit", "outpaint")
     assert engine.environment_input_policy == "approved-geometry-only"
     assert engine.outpaint_detection_policy == "automatic-from-approved-geometry-transparency"
     assert engine.user_mask_required is False
     assert engine.provider_input_policy == "single-approved-geometry-reference"
     assert engine.internal_outpaint_tiles_allowed is False
+    assert engine.missing_region_transport_policy == "native-transparency-single-reference"
 
 
 def test_provider_size_selection_matches_master_orientation():
@@ -65,7 +69,23 @@ def test_automatic_outpaint_plan_is_derived_from_geometry_alpha(tmp_path):
     assert stats["missing_pixels"] > 0
 
 
-def test_transport_uses_one_geometry_reference_and_auto_detection(tmp_path, monkeypatch):
+def test_reference_keeps_missing_pixels_transparent_without_service_colours():
+    geometry = Image.new("RGBA", (24, 16), (40, 60, 80, 255))
+    geometry.paste((0, 0, 0, 0), (0, 0, 6, 16))
+    plan = Image.new("L", (24, 16), 0)
+    plan.paste(255, (0, 0, 6, 16))
+
+    transport_geometry, transport_plan, _ = OpenRouterImageEngine._reference_canvases(
+        geometry,
+        plan,
+        (24, 16),
+    )
+    assert transport_geometry.getpixel((2, 8))[3] == 0
+    assert transport_geometry.getpixel((12, 8))[:3] == (40, 60, 80)
+    assert transport_plan.getpixel((2, 8)) == 255
+
+
+def test_transport_uses_one_geometry_reference_and_hybrid_default(tmp_path, monkeypatch):
     geometry = tmp_path / "geometry.png"
     source_size = (2400, 1800)
     make_geometry(geometry, source_size)
@@ -74,8 +94,12 @@ def test_transport_uses_one_geometry_reference_and_auto_detection(tmp_path, monk
     engine.transmit_max_request_bytes = 2 * 1024 * 1024
     monkeypatch.setattr(engine, "discover_capabilities", lambda: capabilities(engine))
 
+    prompt = (
+        f"{GENERATION_MODE_MARKER}\nHYBRID\n\n"
+        "Убрать столбы и провода. Сделать облачную погоду."
+    )
     result = engine.prepare_environment_inputs(
-        prompt="Дорисовать отсутствующее окружение и убрать только автомобиль справа.",
+        prompt=prompt,
         geometry_image=geometry,
         outpaint_mask=tmp_path / "ignored.png",
         output_dir=tmp_path / "transport",
@@ -91,17 +115,19 @@ def test_transport_uses_one_geometry_reference_and_auto_detection(tmp_path, monk
     assert result["user_outpaint_file_required"] is False
     assert result["provider_reference_count"] == 1
     assert result["input_reference_count"] == 1
-    assert result["generation_mode"] == "automatic-outpaint-and-selective-edit"
+    assert result["generation_mode"] == "hybrid"
+    assert result["requested_generation_mode"] == "hybrid"
+    assert result["visual_reference_policy"] == "native-alpha-no-service-colour-pattern"
     assert result["system_prompt_contract"] == PROMPT_CONTRACT_VERSION
     assert Path(result["effective_mask_path"]).is_file()
 
 
-def test_payload_contains_exact_prompt_and_only_geometry_reference(tmp_path):
+def test_payload_contains_prompt_and_only_geometry_reference(tmp_path):
     geometry = tmp_path / "approved-geometry.png"
     make_geometry(geometry, (320, 240))
 
     payload = OpenRouterImageEngine()._build_payload(
-        prompt="Operator requirement: replace only the car on the right.",
+        prompt="Operator requirement: remove the poles and make the weather cloudy.",
         geometry_image=geometry,
         outpaint_mask=tmp_path / "ignored.png",
         provider_size=(1536, 1024),
@@ -110,7 +136,7 @@ def test_payload_contains_exact_prompt_and_only_geometry_reference(tmp_path):
     assert payload["model"] == NANO_BANANA
     assert ENVIRONMENT_SYSTEM_PROMPT in payload["prompt"]
     assert PROMPT_CONTRACT_VERSION in payload["prompt"]
-    assert "replace only the car on the right" in payload["prompt"]
+    assert "remove the poles" in payload["prompt"]
     assert len(payload["input_references"]) == 1
     assert payload["input_references"][0]["image_url"]["url"].startswith("data:image/")
 
@@ -121,4 +147,4 @@ def test_prepared_request_content_length_is_exact():
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "3.0.0"
+    assert prepared.headers["X-Marins-Transport-Engine"] == "3.1.0"
