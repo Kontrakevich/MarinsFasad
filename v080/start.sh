@@ -25,11 +25,14 @@ cd "$ROOT"
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
 sed -i 's/resilient-fullframe-0806/stable-nanobanana-3000/g; s/selective-nanobanana-0806/stable-nanobanana-3000/g; s/geometry-only-outpaint-0806/stable-nanobanana-3000/g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
-cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" > "$ROOT/app/web/app-v080.js"
+cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" "$ROOT/ui_single_window/grid-ux-patch.js" > "$ROOT/app/web/app-v080.js"
 sed -i 's/Сгенерируйте окружение по всему canvas/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Внесите только указанные точечные изменения через Nano Banana/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Автоматически дорисуйте отсутствующее окружение/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/g' "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
+
+grep -q 'const ZOOM_STEP = 0.05' "$ROOT/app/web/app-v080.js"
+grep -q 'requestGridFullscreen' "$ROOT/app/web/app-v080.js"
 
 python -B - "$EXPECTED_TRANSPORT_ENGINE" "$EXPECTED_MODEL" <<'PY'
 import sys
@@ -58,6 +61,8 @@ print(f"Image model locked: {engine.model}")
 print("Environment input: approved geometry only")
 print("Outpaint: automatic from missing transparent regions")
 print("Prompt: UI compiled prompt is authoritative")
+print("Grid zoom step: 5%")
+print("Grid fullscreen: automatic on grid interaction")
 print("Legacy policy chain: disabled")
 PY
 
