@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -10,28 +11,106 @@ from PIL import Image, ImageChops, ImageOps
 
 from . import ai_engine as _engine_module
 from .hybrid_engine import AIEngineError, OpenRouterImageEngine as _HybridOpenRouterImageEngine
-from .prompt_engine import GENERATION_MODE_MARKER
+from .prompt_engine import (
+    GENERATION_MODE_MARKER,
+    GENERATION_QUALITY_MARKER,
+    VALID_GENERATION_QUALITIES,
+)
 
 
 class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
-    """Canonical skill-aware runtime.
+    """Canonical skill-aware runtime with quality-controlled outpaint.
 
-    OUTPAINT is pixel-preserving outside missing regions. A failed full-frame
-    outpaint is not rejected immediately: the runtime retries the missing image
-    information as context-rich edge tiles and promotes the repaired master only
-    after every missing pixel has been reconstructed.
+    OUTPAINT preserves every valid source pixel. HIGH and MAX quality also run
+    context-rich local edge refinement even when the first full-frame outpaint is
+    technically valid, because a non-blank result can still look like a low-detail
+    patch. Local results are tone-harmonized and feathered only *inside* missing
+    regions; valid source pixels are never blended away.
 
     RELIGHT is a full-frame photometric transformation with geometry locked.
-    IMAGE EDIT keeps requested semantic changes and never restores source pixels
-    over them. HYBRID performs semantic edit/relight first and outpaint second.
+    IMAGE EDIT keeps requested semantic changes. HYBRID performs semantic
+    edit/relight first and outpaint/refinement second.
     """
 
-    transport_engine_version = "3.3.0"
+    transport_engine_version = "3.4.0"
     available_generation_modes = ("hybrid", "relight", "edit", "outpaint")
-    skill_contract_version = "outpaint-relight-edit-hybrid-v1"
-    outpaint_fallback_mode = "edge-tiles-on-placeholder"
-    outpaint_fallback_attempts_per_edge = 2
+    available_generation_qualities = ("draft", "standard", "high", "max")
+    default_generation_quality = "high"
+    skill_contract_version = "outpaint-relight-edit-hybrid-quality-v2"
+    outpaint_fallback_mode = "quality-aware-edge-refine"
     outpaint_initial_qc_blocking = False
+
+    QUALITY_PROFILES: dict[str, dict[str, Any]] = {
+        "draft": {
+            "padding_ratio": 0.10,
+            "padding_min": 72,
+            "padding_max": 160,
+            "feather_px": 12,
+            "max_attempts": 1,
+            "min_attempts": 1,
+            "tone_match_strength": 0.35,
+            "force_edge_refine": False,
+            "quality_threshold": 34.0,
+        },
+        "standard": {
+            "padding_ratio": 0.16,
+            "padding_min": 112,
+            "padding_max": 256,
+            "feather_px": 22,
+            "max_attempts": 2,
+            "min_attempts": 1,
+            "tone_match_strength": 0.50,
+            "force_edge_refine": False,
+            "quality_threshold": 40.0,
+        },
+        "high": {
+            "padding_ratio": 0.24,
+            "padding_min": 192,
+            "padding_max": 448,
+            "feather_px": 34,
+            "max_attempts": 2,
+            "min_attempts": 1,
+            "tone_match_strength": 0.72,
+            "force_edge_refine": True,
+            "quality_threshold": 48.0,
+        },
+        "max": {
+            "padding_ratio": 0.34,
+            "padding_min": 256,
+            "padding_max": 640,
+            "feather_px": 48,
+            "max_attempts": 3,
+            "min_attempts": 2,
+            "tone_match_strength": 0.88,
+            "force_edge_refine": True,
+            "quality_threshold": 56.0,
+        },
+    }
+    outpaint_fallback_attempts_per_edge = 3
+
+    @classmethod
+    def _normalize_generation_quality(cls, value: str | None) -> str:
+        quality = str(value or "").strip().lower()
+        return quality if quality in VALID_GENERATION_QUALITIES else cls.default_generation_quality
+
+    @classmethod
+    def _quality_from_prompt(cls, prompt: str) -> str:
+        text = str(prompt or "")
+        marker = f"{GENERATION_QUALITY_MARKER}\n"
+        index = text.find(marker)
+        if index >= 0:
+            remainder = text[index + len(marker):]
+            first_line = remainder.splitlines()[0].strip().lower() if remainder else ""
+            if first_line in VALID_GENERATION_QUALITIES:
+                return first_line
+        for quality in cls.available_generation_qualities:
+            if f"Generation quality: {quality.upper()}" in text:
+                return quality
+        return cls.default_generation_quality
+
+    @classmethod
+    def _quality_profile(cls, quality: str | None) -> dict[str, Any]:
+        return dict(cls.QUALITY_PROFILES[cls._normalize_generation_quality(quality)])
 
     @staticmethod
     def _pixel_count_local(mask: Image.Image) -> int:
@@ -40,7 +119,7 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
 
     @staticmethod
     def _outpaint_placeholder_stats(candidate: Image.Image, plan: Image.Image) -> dict[str, Any]:
-        """Detect large contiguous blank fills, not legitimate bright/dark scene pixels."""
+        """Detect large contiguous blank fills without rejecting valid bright sky."""
 
         plan_array = np.asarray(
             plan.convert("L").point(lambda value: 255 if value >= 128 else 0, mode="L"),
@@ -91,13 +170,7 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
         width: int,
         height: int,
     ) -> dict:
-        """Promote a provider image without throwing on the first blank outpaint.
-
-        The previous hybrid layer rejected a white/black outpaint here. That made
-        a later repair impossible because generate_environment never received the
-        failed candidate. This implementation records the failure and lets the
-        top-level skill runtime invoke the edge fallback.
-        """
+        """Promote first-pass output but defer placeholder rejection to refinement."""
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -135,6 +208,7 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
         requested_mode = self._normalize_generation_mode(
             prepared.get("requested_generation_mode") or prepared.get("generation_mode")
         )
+        generation_quality = self._quality_from_prompt(str(prepared.get("compiled_prompt_ui") or ""))
 
         if requested_mode == "outpaint":
             candidate = Image.composite(generated_master, approved_rgb, outpaint_plan)
@@ -196,11 +270,29 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
             "automatic_outpaint_plan": str(diagnostic_plan_path),
             "requested_generation_mode": requested_mode,
             "generation_mode": requested_mode,
+            "generation_quality": generation_quality,
             "full_frame_semantic_edit": full_frame_semantic_edit,
             "strong_image_edit_enabled": requested_mode in {"hybrid", "relight", "edit"},
             "initial_outpaint_qc_blocking": False,
             **placeholder,
         }
+
+    def _internal_outpaint_prompt(self, primary_prompt: str) -> str:
+        """Second pass sees the complete original prompt, not a shortened clause."""
+
+        quality = self._quality_from_prompt(primary_prompt)
+        return (
+            "INTERNAL HYBRID PASS 2/2 — OUTPAINT ONLY\n"
+            f"{GENERATION_MODE_MARKER}\nOUTPAINT\n\n"
+            f"{GENERATION_QUALITY_MARKER}\n{quality.upper()}\n\n"
+            "EXECUTION RULE\n"
+            "The supplied image already contains the completed semantic edit / relight result. Existing visible pixels and all completed edits are final.\n"
+            "Reconstruct only pixels where visual information is missing after perspective correction. Treat the missing region as continuation of the SAME photograph, never as a patch.\n"
+            "Match perspective, texture scale, sharpness, photographic noise, colour, weather, lighting, materials and atmosphere. Do not return low-detail filler.\n"
+            "The FULL ORIGINAL COMPILED PROMPT below is mandatory scene context. Preserve every descriptive requirement from it. Nested generation-mode text inside that context is historical; this internal pass remains OUTPAINT ONLY.\n\n"
+            "FULL ORIGINAL COMPILED PROMPT — MANDATORY CONTEXT\n"
+            f"{primary_prompt}"
+        )
 
     @staticmethod
     def _edge_owner_masks(plan: Image.Image) -> list[tuple[str, np.ndarray]]:
@@ -232,9 +324,11 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
         base_image: Path,
         outpaint_plan: Path,
         output_dir: Path,
+        generation_quality: str,
     ) -> list[dict[str, Any]]:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        profile = self._quality_profile(generation_quality)
 
         with Image.open(base_image) as source:
             base_rgba = ImageOps.exif_transpose(source).convert("RGBA")
@@ -245,7 +339,8 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
             )
 
         width, height = base_rgba.size
-        padding = max(96, int(round(min(width, height) * 0.14)))
+        padding = int(round(min(width, height) * float(profile["padding_ratio"])))
+        padding = max(int(profile["padding_min"]), min(int(profile["padding_max"]), padding))
         base_array = np.asarray(base_rgba, dtype=np.uint8)
         targets: list[dict[str, Any]] = []
 
@@ -262,9 +357,6 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
             true_mask = np.where(owner_mask[y1:y2, x1:x2], 255, 0).astype(np.uint8)
             all_missing = crop[:, :, 3] < 250
 
-            # Other transparent areas inside the context crop are filled only as
-            # temporary visual context. Final promotion uses true_mask, so these
-            # service pixels never enter the delivered image.
             context_rgb = crop[:, :, :3]
             if np.any(all_missing):
                 context_rgb = cv2.inpaint(
@@ -274,7 +366,7 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
                     cv2.INPAINT_TELEA,
                 )
 
-            dilate_radius = max(5, min(16, int(round(min(x2 - x1, y2 - y1) * 0.015))))
+            dilate_radius = max(7, min(28, int(round(min(x2 - x1, y2 - y1) * 0.022))))
             kernel_size = dilate_radius * 2 + 1
             dilated = cv2.dilate(
                 true_mask,
@@ -292,60 +384,175 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
             tile_dir.mkdir(parents=True, exist_ok=True)
             geometry_path = tile_dir / "tile-geometry.png"
             mask_path = tile_dir / "true-missing-region.png"
-            Image.fromarray(tile_rgba, mode="RGBA").save(
-                geometry_path,
-                format="PNG",
-                optimize=False,
-            )
-            Image.fromarray(true_mask, mode="L").save(
-                mask_path,
-                format="PNG",
-                optimize=False,
-            )
+            context_path = tile_dir / "context-rgb.png"
+            Image.fromarray(tile_rgba, mode="RGBA").save(geometry_path, format="PNG", optimize=False)
+            Image.fromarray(true_mask, mode="L").save(mask_path, format="PNG", optimize=False)
+            Image.fromarray(context_rgb, mode="RGB").save(context_path, format="PNG", optimize=False)
             targets.append(
                 {
                     "side": side,
                     "bbox": (x1, y1, x2, y2),
                     "geometry": geometry_path,
                     "mask": mask_path,
+                    "context": context_path,
                     "width": x2 - x1,
                     "height": y2 - y1,
+                    "padding": padding,
                     "missing_pixels": int(np.count_nonzero(true_mask)),
                 }
             )
 
         return targets
 
-    def _edge_tile_prompt(self, original_prompt: str, side: str, attempt: int) -> str:
-        operator = self._operator_block(original_prompt)
+    def _edge_tile_prompt(
+        self,
+        original_prompt: str,
+        side: str,
+        attempt: int,
+        generation_quality: str,
+        max_attempts: int,
+    ) -> str:
         retry_note = (
-            "The previous local attempt left a blank placeholder. Use real scene texture and structure this time.\n"
+            "The previous local candidate was blank, too soft, too unrelated or visibly patch-like. Improve real texture, continuity and detail.\n"
             if attempt > 1
             else ""
         )
         return (
-            "INTERNAL EDGE OUTPAINT FALLBACK\n"
-            f"Edge: {side.upper()}. Attempt: {attempt}/{self.outpaint_fallback_attempts_per_edge}.\n"
-            "The transparent area is missing photographic information, not a white/black object.\n"
-            "Reconstruct it as a photorealistic continuation of the immediately adjacent scene.\n"
-            "Continue perspective lines, sky, facade edges, neighbouring buildings, pavement, vegetation, shadows and lighting naturally.\n"
-            "Do not redesign any existing visible content. Never output a blank, solid white, solid black or flat-colour fill.\n"
-            f"{retry_note}\n"
+            "INTERNAL QUALITY EDGE OUTPAINT\n"
             f"{GENERATION_MODE_MARKER}\nOUTPAINT\n\n"
-            "ORIGINAL OPERATOR REQUEST — CONTEXT ONLY\n"
-            f"{operator}"
+            f"{GENERATION_QUALITY_MARKER}\n{generation_quality.upper()}\n\n"
+            f"Edge: {side.upper()}. Candidate: {attempt}/{max_attempts}.\n"
+            "The transparent area is missing photographic information. Reconstruct it as continuation of the SAME photograph, not as an inserted patch.\n"
+            "Use the broad visible context to continue exact perspective, ground/sky structure, texture frequency, sharpness, photographic noise, colour, lighting, shadows and materials.\n"
+            "Do not redesign visible content. Never output a blank, solid fill or low-detail smear.\n"
+            "All explicit scene requirements in the FULL ORIGINAL COMPILED PROMPT below are mandatory context. Nested mode text is historical; this local pass is OUTPAINT ONLY.\n"
+            f"{retry_note}\n"
+            "FULL ORIGINAL COMPILED PROMPT — MANDATORY CONTEXT\n"
+            f"{original_prompt}"
         )
 
-    def _run_edge_tile_fallback(
+    @staticmethod
+    def _tile_quality_stats(
+        candidate: Image.Image,
+        context: Image.Image,
+        mask: Image.Image,
+    ) -> dict[str, Any]:
+        rgb = np.asarray(candidate.convert("RGB"), dtype=np.uint8)
+        context_rgb = np.asarray(context.convert("RGB"), dtype=np.uint8)
+        mask_u8 = np.asarray(mask.convert("L"), dtype=np.uint8)
+        inside = mask_u8 > 0
+        inside_pixels = int(np.count_nonzero(inside))
+        if inside_pixels == 0:
+            return {
+                "quality_score": 0.0,
+                "boundary_colour_delta": 255.0,
+                "inside_detail": 0.0,
+                "context_detail": 0.0,
+                "detail_ratio": 0.0,
+                "low_detail_detected": True,
+            }
+
+        band = max(5, min(18, int(round(min(mask_u8.shape) * 0.025))))
+        kernel = np.ones((band * 2 + 1, band * 2 + 1), dtype=np.uint8)
+        dilated = cv2.dilate(np.where(inside, 255, 0).astype(np.uint8), kernel, iterations=1) > 0
+        outer = dilated & ~inside
+        distance = cv2.distanceTransform(np.where(inside, 255, 0).astype(np.uint8), cv2.DIST_L2, 5)
+        inner_boundary = inside & (distance <= float(band))
+
+        if np.any(inner_boundary) and np.any(outer):
+            inside_mean = rgb[inner_boundary].astype(np.float32).mean(axis=0)
+            outer_mean = context_rgb[outer].astype(np.float32).mean(axis=0)
+            colour_delta = float(np.mean(np.abs(inside_mean - outer_mean)))
+        else:
+            colour_delta = 32.0
+
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        context_gray = cv2.cvtColor(context_rgb, cv2.COLOR_RGB2GRAY)
+        lap = cv2.Laplacian(gray, cv2.CV_64F)
+        context_lap = cv2.Laplacian(context_gray, cv2.CV_64F)
+        inside_detail = float(np.var(lap[inside])) if np.any(inside) else 0.0
+        context_detail = float(np.var(context_lap[outer])) if np.any(outer) else inside_detail
+        detail_ratio = (inside_detail + 1.0) / (context_detail + 1.0)
+        low_detail = bool(context_detail > 18.0 and detail_ratio < 0.22)
+
+        detail_penalty = abs(math.log(max(0.05, min(20.0, detail_ratio)))) * 8.0
+        score = 100.0 - min(70.0, colour_delta * 0.72) - min(40.0, detail_penalty)
+        if low_detail:
+            score -= 18.0
+        score = max(0.0, min(100.0, score))
+        return {
+            "quality_score": round(score, 3),
+            "boundary_colour_delta": round(colour_delta, 3),
+            "inside_detail": round(inside_detail, 3),
+            "context_detail": round(context_detail, 3),
+            "detail_ratio": round(detail_ratio, 4),
+            "low_detail_detected": low_detail,
+        }
+
+    @staticmethod
+    def _harmonize_and_blend_inside_missing(
+        *,
+        generated: Image.Image,
+        existing: Image.Image,
+        context: Image.Image,
+        mask: Image.Image,
+        feather_px: int,
+        tone_match_strength: float,
+    ) -> Image.Image:
+        generated_np = np.asarray(generated.convert("RGB"), dtype=np.float32)
+        existing_np = np.asarray(existing.convert("RGB"), dtype=np.float32)
+        context_np = np.asarray(context.convert("RGB"), dtype=np.uint8)
+        mask_u8 = np.asarray(mask.convert("L"), dtype=np.uint8)
+        inside = mask_u8 > 0
+        if not np.any(inside):
+            return existing.convert("RGB")
+
+        band = max(5, min(24, int(feather_px)))
+        kernel = np.ones((band * 2 + 1, band * 2 + 1), dtype=np.uint8)
+        dilated = cv2.dilate(np.where(inside, 255, 0).astype(np.uint8), kernel, iterations=1) > 0
+        outer = dilated & ~inside
+        distance = cv2.distanceTransform(np.where(inside, 255, 0).astype(np.uint8), cv2.DIST_L2, 5)
+        inner_boundary = inside & (distance <= float(band))
+
+        adjusted = generated_np.copy()
+        if np.any(inner_boundary) and np.any(outer):
+            inner_mean = generated_np[inner_boundary].mean(axis=0)
+            outer_mean = context_np[outer].astype(np.float32).mean(axis=0)
+            delta = np.clip(outer_mean - inner_mean, -32.0, 32.0) * float(tone_match_strength)
+            adjusted[inside] = np.clip(adjusted[inside] + delta, 0.0, 255.0)
+
+        inpaint_radius = max(5, min(15, int(round(feather_px * 0.35))))
+        context_fill = cv2.inpaint(
+            context_np,
+            np.where(inside, 255, 0).astype(np.uint8),
+            inpaint_radius,
+            cv2.INPAINT_TELEA,
+        ).astype(np.float32)
+
+        alpha = np.clip(distance / max(1.0, float(feather_px)), 0.0, 1.0)
+        alpha = alpha[:, :, None]
+        blended_missing = adjusted * alpha + context_fill * (1.0 - alpha)
+
+        output = existing_np.copy()
+        output[inside] = blended_missing[inside]
+        return Image.fromarray(np.clip(output, 0, 255).astype(np.uint8), mode="RGB")
+
+    def _run_edge_tile_refinement(
         self,
         *,
         original_prompt: str,
         base_image: Path,
         outpaint_plan: Path,
         output_dir: Path,
+        generation_quality: str,
+        seed_candidate: Path | None,
+        require_complete: bool,
+        reason: str,
     ) -> dict[str, Any]:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        quality = self._normalize_generation_quality(generation_quality)
+        profile = self._quality_profile(quality)
 
         with Image.open(base_image) as source:
             base_rgba = ImageOps.exif_transpose(source).convert("RGBA")
@@ -355,43 +562,76 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
                 mode="L",
             )
 
-        targets = self._build_edge_targets(
-            base_image=base_image,
-            outpaint_plan=outpaint_plan,
-            output_dir=output_dir / "targets",
-        )
         missing_pixels = self._pixel_count_local(plan)
         if missing_pixels == 0:
             candidate_path = output_dir / "candidate.png"
             base_rgba.convert("RGB").save(candidate_path, format="PNG", optimize=False)
             return {
                 "candidate": str(candidate_path),
-                "outpaint_fallback_used": False,
-                "outpaint_fallback_reason": "no-missing-regions",
+                "outpaint_refinement_used": False,
+                "outpaint_refinement_reason": "no-missing-regions",
                 "fallback_provider_calls": 0,
                 "fallback_failed_edges": [],
                 "fallback_remaining_pixels": 0,
             }
-        if not targets:
-            raise AIEngineError(
-                "Система видит отсутствующие участки изображения, но не смогла построить области локального outpaint.",
-                details={
-                    "reason": "edge_fallback_plan_empty",
-                    "missing_pixels": missing_pixels,
-                },
-            )
 
-        working = base_rgba.convert("RGB")
-        coverage = np.zeros((base_rgba.height, base_rgba.width), dtype=bool)
+        targets = self._build_edge_targets(
+            base_image=base_image,
+            outpaint_plan=outpaint_plan,
+            output_dir=output_dir / "targets",
+            generation_quality=quality,
+        )
+        if not targets:
+            if require_complete:
+                raise AIEngineError(
+                    "Система видит отсутствующие участки изображения, но не смогла построить области локального outpaint.",
+                    details={"reason": "edge_refinement_plan_empty", "missing_pixels": missing_pixels},
+                )
+            return {
+                "candidate": str(seed_candidate or base_image),
+                "outpaint_refinement_used": False,
+                "outpaint_refinement_reason": "no-edge-targets",
+                "fallback_provider_calls": 0,
+                "fallback_failed_edges": [],
+                "fallback_remaining_pixels": 0,
+            }
+
+        if seed_candidate and Path(seed_candidate).is_file():
+            with Image.open(seed_candidate) as source:
+                working = ImageOps.exif_transpose(source).convert("RGB")
+            coverage = np.asarray(plan, dtype=np.uint8) > 0
+        else:
+            working = base_rgba.convert("RGB")
+            coverage = np.zeros((base_rgba.height, base_rgba.width), dtype=bool)
+
         provider_calls = 0
         failed_edges: list[str] = []
         attempts_log: list[dict[str, Any]] = []
+        selected_log: list[dict[str, Any]] = []
+        max_attempts = int(profile["max_attempts"])
+        min_attempts = int(profile["min_attempts"])
+        threshold = float(profile["quality_threshold"])
 
         for target in targets:
             side = str(target["side"])
-            success = False
-            for attempt in range(1, self.outpaint_fallback_attempts_per_edge + 1):
-                prompt = self._edge_tile_prompt(original_prompt, side, attempt)
+            candidates: list[tuple[float, Image.Image, dict[str, Any], dict[str, Any]]] = []
+
+            with Image.open(target["mask"]) as mask_source:
+                true_mask = ImageOps.exif_transpose(mask_source).convert("L").point(
+                    lambda value: 255 if value >= 128 else 0,
+                    mode="L",
+                )
+            with Image.open(target["context"]) as context_source:
+                context = ImageOps.exif_transpose(context_source).convert("RGB")
+
+            for attempt in range(1, max_attempts + 1):
+                prompt = self._edge_tile_prompt(
+                    original_prompt,
+                    side,
+                    attempt,
+                    quality,
+                    max_attempts,
+                )
                 attempt_dir = output_dir / "generation" / side / f"attempt-{attempt}"
                 previous_internal = getattr(self._runtime, "internal_geometry", None)
                 self._runtime.internal_geometry = str(Path(target["geometry"]).resolve())
@@ -419,34 +659,56 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
                 provider_calls += 1
                 with Image.open(result["candidate"]) as candidate_source:
                     tile_candidate = ImageOps.exif_transpose(candidate_source).convert("RGB")
-                with Image.open(target["mask"]) as mask_source:
-                    true_mask = ImageOps.exif_transpose(mask_source).convert("L").point(
-                        lambda value: 255 if value >= 128 else 0,
-                        mode="L",
-                    )
-                stats = self._outpaint_placeholder_stats(tile_candidate, true_mask)
-                attempts_log.append(
-                    {
-                        "side": side,
-                        "attempt": attempt,
-                        "candidate": result.get("candidate"),
-                        **stats,
-                    }
-                )
-                if stats["outpaint_placeholder_detected"]:
-                    continue
+                placeholder = self._outpaint_placeholder_stats(tile_candidate, true_mask)
+                quality_stats = self._tile_quality_stats(tile_candidate, context, true_mask)
+                attempt_info = {
+                    "side": side,
+                    "attempt": attempt,
+                    "candidate": result.get("candidate"),
+                    **placeholder,
+                    **quality_stats,
+                }
+                attempts_log.append(attempt_info)
 
-                bbox = tuple(target["bbox"])
-                current_crop = working.crop(bbox)
-                composed = Image.composite(tile_candidate, current_crop, true_mask)
-                working.paste(composed, (bbox[0], bbox[1]))
-                mask_array = np.asarray(true_mask, dtype=np.uint8) > 0
-                coverage[bbox[1]:bbox[3], bbox[0]:bbox[2]] |= mask_array
-                success = True
-                break
+                if not placeholder["outpaint_placeholder_detected"]:
+                    candidates.append((float(quality_stats["quality_score"]), tile_candidate.copy(), attempt_info, result))
 
-            if not success:
+                if (
+                    attempt >= min_attempts
+                    and candidates
+                    and max(item[0] for item in candidates) >= threshold
+                    and not bool(max(candidates, key=lambda item: item[0])[2].get("low_detail_detected"))
+                ):
+                    break
+
+            if not candidates:
                 failed_edges.append(side)
+                continue
+
+            best_score, best_candidate, best_info, _ = max(candidates, key=lambda item: item[0])
+            bbox = tuple(target["bbox"])
+            existing_crop = working.crop(bbox)
+            blended = self._harmonize_and_blend_inside_missing(
+                generated=best_candidate,
+                existing=existing_crop,
+                context=context,
+                mask=true_mask,
+                feather_px=int(profile["feather_px"]),
+                tone_match_strength=float(profile["tone_match_strength"]),
+            )
+            working.paste(blended, (bbox[0], bbox[1]))
+            mask_array = np.asarray(true_mask, dtype=np.uint8) > 0
+            coverage[bbox[1]:bbox[3], bbox[0]:bbox[2]] |= mask_array
+            selected_log.append(
+                {
+                    "side": side,
+                    "selected_attempt": best_info["attempt"],
+                    "selected_quality_score": round(best_score, 3),
+                    "padding": target["padding"],
+                    "feather_px": int(profile["feather_px"]),
+                    "tone_match_strength": float(profile["tone_match_strength"]),
+                }
+            )
 
         plan_array = np.asarray(plan, dtype=np.uint8) > 0
         remaining = plan_array & ~coverage
@@ -457,33 +719,35 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
 
         diagnostics = {
             "candidate": str(candidate_path),
-            "outpaint_fallback_used": True,
+            "outpaint_refinement_used": True,
+            "outpaint_fallback_used": reason == "full-frame-placeholder",
             "outpaint_fallback_mode": self.outpaint_fallback_mode,
-            "outpaint_fallback_reason": "full-frame-placeholder",
+            "outpaint_refinement_reason": reason,
+            "generation_quality": quality,
+            "quality_profile": profile,
             "fallback_provider_calls": provider_calls,
             "fallback_failed_edges": failed_edges,
             "fallback_remaining_pixels": remaining_pixels,
             "fallback_missing_pixels": missing_pixels,
             "fallback_attempts": attempts_log,
+            "selected_edge_candidates": selected_log,
             "fallback_final_placeholder": final_stats,
+            "full_prompt_context_sha256": self._prompt_sha256(original_prompt),
         }
-        (output_dir / "fallback.json").write_text(
+        (output_dir / "refinement.json").write_text(
             json.dumps(diagnostics, ensure_ascii=False, indent=2),
             "utf-8",
         )
 
-        if remaining_pixels > 0 or final_stats["outpaint_placeholder_detected"]:
+        if require_complete and (remaining_pixels > 0 or final_stats["outpaint_placeholder_detected"]):
             raise AIEngineError(
-                "Nano Banana не смогла полностью дорисовать окружение даже после локального edge-outpaint fallback.",
-                details={
-                    "reason": "outpaint_failed_after_edge_fallback",
-                    **diagnostics,
-                },
+                "Nano Banana не смогла полностью дорисовать окружение даже после локального quality edge-refinement.",
+                details={"reason": "outpaint_failed_after_edge_refinement", **diagnostics},
             )
 
         return diagnostics
 
-    def _repair_placeholder_if_needed(
+    def _repair_or_refine_outpaint(
         self,
         *,
         result: dict,
@@ -492,8 +756,17 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
     ) -> dict:
         if mode not in {"outpaint", "hybrid"}:
             return result
-        if not bool(result.get("outpaint_placeholder_detected")):
+
+        original_prompt = str(kwargs.get("prompt") or "")
+        quality = self._quality_from_prompt(original_prompt)
+        profile = self._quality_profile(quality)
+        placeholder = bool(result.get("outpaint_placeholder_detected"))
+        force_refine = bool(profile["force_edge_refine"])
+        if not placeholder and not force_refine:
             result.setdefault("outpaint_fallback_used", False)
+            result.setdefault("outpaint_refinement_used", False)
+            result["generation_quality"] = quality
+            result["quality_profile"] = profile
             return result
 
         prepared = kwargs.get("prepared_input") or {}
@@ -504,40 +777,53 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
         )
         if not plan_value:
             raise AIEngineError(
-                "Не найден внутренний план отсутствующих областей для повторного outpaint.",
-                details={"reason": "outpaint_fallback_plan_missing"},
+                "Не найден внутренний план отсутствующих областей для quality outpaint.",
+                details={"reason": "outpaint_refinement_plan_missing"},
             )
 
         if mode == "hybrid":
             base_value = result.get("hybrid_intermediate")
             if not base_value:
                 raise AIEngineError(
-                    "Не найден промежуточный результат image edit для локального outpaint.",
+                    "Не найден промежуточный результат image edit для quality outpaint.",
                     details={"reason": "hybrid_intermediate_missing"},
                 )
         else:
             base_value = kwargs.get("geometry_image")
 
-        fallback = self._run_edge_tile_fallback(
-            original_prompt=str(kwargs.get("prompt") or ""),
-            base_image=Path(base_value),
-            outpaint_plan=Path(plan_value),
-            output_dir=Path(kwargs["output_dir"]) / "edge-outpaint-fallback",
+        reason = "full-frame-placeholder" if placeholder else "quality-edge-refine"
+        seed_candidate = None if placeholder else Path(str(result["candidate"]))
+        refinement = self._run_edge_tile_refinement(
+            original_prompt=original_prompt,
+            base_image=Path(str(base_value)),
+            outpaint_plan=Path(str(plan_value)),
+            output_dir=Path(kwargs["output_dir"]) / "quality-edge-refinement",
+            generation_quality=quality,
+            seed_candidate=seed_candidate,
+            require_complete=placeholder,
+            reason=reason,
         )
+
         repaired = dict(result)
-        repaired.update(fallback)
-        repaired["candidate"] = fallback["candidate"]
-        repaired["environment_master"] = fallback["candidate"]
-        repaired["outpaint_placeholder_detected"] = False
-        repaired["initial_outpaint_placeholder_detected"] = True
-        repaired["provider_call_count"] = int(result.get("provider_call_count") or 1) + int(
-            fallback.get("fallback_provider_calls") or 0
+        repaired.update(refinement)
+        repaired["candidate"] = refinement["candidate"]
+        repaired["environment_master"] = refinement["candidate"]
+        repaired["initial_outpaint_placeholder_detected"] = placeholder
+        repaired["outpaint_placeholder_detected"] = False if placeholder else bool(
+            refinement.get("fallback_final_placeholder", {}).get("outpaint_placeholder_detected", False)
         )
+        repaired["provider_call_count"] = int(result.get("provider_call_count") or 1) + int(
+            refinement.get("fallback_provider_calls") or 0
+        )
+        repaired["generation_quality"] = quality
+        repaired["quality_profile"] = profile
         return repaired
 
-    def _promote_skill_metadata(self, result: dict, mode: str) -> dict:
+    def _promote_skill_metadata(self, result: dict, mode: str, quality: str) -> dict:
         result["active_skill"] = mode
         result["skill_contract_version"] = self.skill_contract_version
+        result["generation_quality"] = quality
+        result["available_generation_qualities"] = list(self.available_generation_qualities)
         result["pixel_preservation_scope"] = (
             "outside-missing-regions"
             if mode == "outpaint"
@@ -549,24 +835,25 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
         result["global_relight_enabled"] = mode in {"relight", "hybrid"}
         result["strong_image_edit_enabled"] = mode in {"hybrid", "relight", "edit"}
         result["outpaint_fallback_mode"] = self.outpaint_fallback_mode
+        result["full_prompt_context_policy"] = "complete-compiled-prompt-propagated-to-outpaint-and-edge-refinement"
         return result
 
     def generate_environment(self, **kwargs) -> dict:
-        # The runtime owns the generation directory lifecycle. Create it before
-        # entering the hybrid engine so every path can persist diagnostics.
         output_dir = Path(kwargs["output_dir"])
         output_dir.mkdir(parents=True, exist_ok=True)
+        original_prompt = str(kwargs.get("prompt") or "")
+        quality = self._quality_from_prompt(original_prompt)
 
         result = super().generate_environment(**kwargs)
         mode = self._normalize_generation_mode(
             result.get("requested_generation_mode") or result.get("generation_mode")
         )
-        result = self._repair_placeholder_if_needed(
+        result = self._repair_or_refine_outpaint(
             result=result,
             kwargs=kwargs,
             mode=mode,
         )
-        result = self._promote_skill_metadata(result, mode)
+        result = self._promote_skill_metadata(result, mode, quality)
         result["available_generation_modes"] = list(self.available_generation_modes)
 
         (output_dir / "generation.json").write_text(
