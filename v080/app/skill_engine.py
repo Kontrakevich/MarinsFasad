@@ -40,6 +40,12 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
         return result
 
     def generate_environment(self, **kwargs) -> dict:
+        # The runtime owns the generation directory lifecycle. Create it before
+        # entering the hybrid engine so the one-pass path can always persist
+        # generation.json even when provider/test doubles do not create folders.
+        output_dir = Path(kwargs["output_dir"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         result = super().generate_environment(**kwargs)
         mode = self._normalize_generation_mode(
             result.get("requested_generation_mode") or result.get("generation_mode")
@@ -60,7 +66,6 @@ class OpenRouterImageEngine(_HybridOpenRouterImageEngine):
                 ),
             }
         )
-        output_dir = Path(kwargs["output_dir"])
         (output_dir / "generation.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2),
             "utf-8",
