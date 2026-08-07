@@ -97,7 +97,7 @@ cleanup_failed_start() {
 
 for _ in $(seq 1 30); do
   if ! kill -0 "$NEW_PID" 2>/dev/null; then
-    echo "Marins Facade v0.8.1 Hybrid process exited during startup." >&2
+    echo "Marins Facade v0.8.0 Hybrid process exited during startup." >&2
     tail -100 "$LOG_FILE" >&2 || true
     rm -f "$PID_FILE"
     exit 1
@@ -118,7 +118,7 @@ ok = (
 raise SystemExit(0 if ok else 1)
 PY
     then
-      echo "Marins Facade v0.8.1 Hybrid started on port 8070 (PID $NEW_PID)"
+      echo "Marins Facade v0.8.0 Hybrid started on port 8070 (PID $NEW_PID)"
       echo "Transport engine: $EXPECTED_TRANSPORT_ENGINE"
       echo "Prompt contract: $EXPECTED_PROMPT_CONTRACT"
       echo "Image model: $EXPECTED_MODEL"
