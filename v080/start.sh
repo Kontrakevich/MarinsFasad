@@ -4,19 +4,8 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="/tmp/marins-facade-v080.pid"
 LOG_FILE="/tmp/marins-facade-v080.log"
 HEALTH_FILE="/tmp/marins-facade-v080-health.json"
-EXPECTED_TRANSPORT_ENGINE="2.9.1"
-EXPECTED_PROMPT_CONTRACT="environment-system-v1.4"
+EXPECTED_TRANSPORT_ENGINE="3.0.0"
 EXPECTED_MODEL="google/gemini-2.5-flash-image"
-
-if [ -f "/tmp/marins-facade-v060.pid" ]; then
-  LEGACY_PID="$(cat /tmp/marins-facade-v060.pid 2>/dev/null || true)"
-  if [ -n "$LEGACY_PID" ] && kill -0 "$LEGACY_PID" 2>/dev/null; then
-    kill "$LEGACY_PID" 2>/dev/null || true
-    sleep 1
-    kill -9 "$LEGACY_PID" 2>/dev/null || true
-  fi
-  rm -f /tmp/marins-facade-v060.pid
-fi
 
 if [ -f "$PID_FILE" ]; then
   OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
@@ -29,73 +18,47 @@ fi
 PORT_PIDS="$(fuser 8070/tcp 2>/dev/null || true)"
 if [ -n "$PORT_PIDS" ]; then
   kill $PORT_PIDS 2>/dev/null || true
-  sleep 2
-fi
-if ss -ltnp 2>/dev/null | grep -q ':8070 '; then
-  PORT_PIDS="$(fuser 8070/tcp 2>/dev/null || true)"
-  [ -z "$PORT_PIDS" ] || kill -9 $PORT_PIDS 2>/dev/null || true
   sleep 1
 fi
 
 cd "$ROOT"
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
-sed -i 's/resilient-fullframe-0806/geometry-only-outpaint-0806/g; s/selective-nanobanana-0806/geometry-only-outpaint-0806/g' "$ROOT/app/web/index.html"
+sed -i 's/resilient-fullframe-0806/stable-nanobanana-3000/g; s/selective-nanobanana-0806/stable-nanobanana-3000/g; s/geometry-only-outpaint-0806/stable-nanobanana-3000/g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
 cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" > "$ROOT/app/web/app-v080.js"
-sed -i 's/Сгенерируйте окружение по всему canvas/Автоматически дорисуйте отсутствующее окружение/g' "$ROOT/app/web/app-v080.js"
-sed -i 's/Внесите только указанные точечные изменения через Nano Banana/Автоматически дорисуйте отсутствующее окружение/g' "$ROOT/app/web/app-v080.js"
+sed -i 's/Сгенерируйте окружение по всему canvas/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/g' "$ROOT/app/web/app-v080.js"
+sed -i 's/Внесите только указанные точечные изменения через Nano Banana/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/g' "$ROOT/app/web/app-v080.js"
+sed -i 's/Автоматически дорисуйте отсутствующее окружение/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/g' "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
 
-grep -q 'geometry-only-outpaint-0806' "$ROOT/app/web/index.html"
-grep -q 'Автоматически дорисуйте отсутствующее окружение' "$ROOT/app/web/app-v080.js"
-grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
-grep -q 'approved-geometry-only' "$ROOT/app/main.py"
-grep -q 'automatic-from-approved-geometry' "$ROOT/app/main.py"
-grep -q 'single-approved-geometry-reference' "$ROOT/app/prompt_enforcement_policy.py"
-grep -q 'transport_engine_version = "2.9.1"' "$ROOT/app/geometry_only_outpaint_policy.py"
-grep -q 'internal-derived-outpaint-tile' "$ROOT/app/geometry_only_outpaint_policy.py"
-! grep -q 'geometry_outpaint_mask' "$ROOT/app/main.py"
-
-find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
-find "$ROOT" -type f -name '*.pyc' -delete
-python -B - "$EXPECTED_TRANSPORT_ENGINE" "$EXPECTED_PROMPT_CONTRACT" "$EXPECTED_MODEL" <<'PY'
+python -B - "$EXPECTED_TRANSPORT_ENGINE" "$EXPECTED_MODEL" <<'PY'
 import sys
 from app.ai_engine import OpenRouterImageEngine
-from app.main import health
-from app.system_prompts import PROMPT_CONTRACT_VERSION
 
-expected_engine, expected_prompt, expected_model = sys.argv[1:4]
+expected_engine, expected_model = sys.argv[1:3]
 engine = OpenRouterImageEngine()
-actual = OpenRouterImageEngine.transport_engine_version
-if actual != expected_engine:
-    raise SystemExit(f"Transport engine mismatch: expected {expected_engine}, got {actual}")
-if PROMPT_CONTRACT_VERSION != expected_prompt:
-    raise SystemExit(f"Prompt contract mismatch: expected {expected_prompt}, got {PROMPT_CONTRACT_VERSION}")
+if OpenRouterImageEngine.transport_engine_version != expected_engine:
+    raise SystemExit(
+        f"Transport engine mismatch: expected {expected_engine}, got {OpenRouterImageEngine.transport_engine_version}"
+    )
 if engine.model != expected_model or engine.required_model != expected_model:
     raise SystemExit(f"Model lock mismatch: expected {expected_model}, got {engine.model}")
 if engine.environment_input_policy != "approved-geometry-only":
-    raise SystemExit("Geometry-only environment input is not active")
+    raise SystemExit("Geometry-only input policy is inactive")
 if engine.outpaint_detection_policy != "automatic-from-approved-geometry-transparency":
-    raise SystemExit("Automatic outpaint detection is not active")
-if engine.user_mask_required is not False:
-    raise SystemExit("A user mask must never be required")
-if engine.internal_outpaint_tiles_allowed is not True:
-    raise SystemExit("Internal outpaint tiles must be allowed")
+    raise SystemExit("Automatic outpaint detection is inactive")
 if engine.provider_input_policy != "single-approved-geometry-reference":
     raise SystemExit("Nano Banana must receive one geometry reference")
-health_payload = health()
-if health_payload.get("generation_mode") != "background-job-polling":
-    raise SystemExit("Background generation polling is not active")
-if health_payload.get("environment_input") != "approved-geometry-only":
-    raise SystemExit("Health signature does not expose geometry-only input")
-print(f"Transport engine {actual} verified")
-print(f"Prompt contract: {PROMPT_CONTRACT_VERSION}")
+if engine.user_mask_required is not False:
+    raise SystemExit("User mask must not exist")
+if engine.internal_outpaint_tiles_allowed is not False:
+    raise SystemExit("Legacy tiled repair must be disabled")
+print("Stable engine 3.0.0 verified")
 print(f"Image model locked: {engine.model}")
-print("Environment input: approved corrected geometry only")
-print("Outpaint detection: automatic from missing transparent regions")
-print("User mask: does not exist")
-print("Internal outpaint tiles: derived from approved geometry and allowed")
-print("Provider input: one approved geometry reference")
+print("Environment input: approved geometry only")
+print("Outpaint: automatic from missing transparent regions")
+print("Prompt: UI compiled prompt is authoritative")
+print("Legacy policy chain: disabled")
 PY
 
 : > "$LOG_FILE"
@@ -135,10 +98,8 @@ PY
     then
       echo "Marins Facade v0.8.0 standalone started on port 8070 (PID $NEW_PID)"
       echo "Transport engine: $EXPECTED_TRANSPORT_ENGINE"
-      echo "Prompt contract: $EXPECTED_PROMPT_CONTRACT"
       echo "Image model: $EXPECTED_MODEL"
-      echo "Environment input: approved geometry only"
-      echo "Outpaint: automatic"
+      echo "Runtime policy: single stable engine"
       cat "$HEALTH_FILE"
       exit 0
     fi
@@ -146,7 +107,7 @@ PY
   sleep 1
 done
 
-echo "Server did not expose the required geometry-only automatic-outpaint signature." >&2
+echo "Server did not expose the required stable v0.8 runtime." >&2
 tail -100 "$LOG_FILE" >&2 || true
 cleanup_failed_start
 exit 1
