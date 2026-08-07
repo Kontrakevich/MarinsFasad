@@ -16,7 +16,7 @@ def test_generation_polling_retries_transient_codespaces_errors():
 def test_stable_build_keeps_resilient_generation_bridge():
     build = (ROOT / "build.sh").read_text("utf-8")
     start = (ROOT / "start.sh").read_text("utf-8")
-    assert "stable-nanobanana-3000" in build
-    assert "stable-nanobanana-3000" in start
+    assert "working-master-3001" in build
+    assert "working-master-3001" in start
     assert "async-generation-bridge.js" in build
     assert "async-generation-bridge.js" in start
