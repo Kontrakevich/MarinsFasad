@@ -23,13 +23,16 @@ def test_only_stable_engine_is_imported_by_app_package():
         assert not (ROOT / "app" / f"{obsolete}.py").exists()
 
 
-def test_active_engine_contract_is_stable_v3000():
+def test_active_engine_contract_is_hybrid_v3100():
     engine = OpenRouterImageEngine()
-    assert engine.transport_engine_version == "3.0.0"
+    assert engine.transport_engine_version == "3.1.0"
     assert engine.model == "google/gemini-2.5-flash-image"
+    assert engine.default_generation_mode == "hybrid"
+    assert engine.available_generation_modes == ("hybrid", "edit", "outpaint")
     assert engine.environment_input_policy == "approved-geometry-only"
     assert engine.outpaint_detection_policy == "automatic-from-approved-geometry-transparency"
     assert engine.provider_input_policy == "single-approved-geometry-reference"
     assert engine.prompt_transport_policy == "ui-compiled-prompt-sent-verbatim"
+    assert engine.missing_region_transport_policy == "native-transparency-single-reference"
     assert engine.user_mask_required is False
     assert engine.internal_outpaint_tiles_allowed is False
