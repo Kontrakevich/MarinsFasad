@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
-sed -i 's/resilient-fullframe-0806/stable-nanobanana-3000/g; s/selective-nanobanana-0806/stable-nanobanana-3000/g; s/geometry-only-outpaint-0806/stable-nanobanana-3000/g' "$ROOT/app/web/index.html"
+sed -i 's/resilient-fullframe-0806/working-master-3001/g; s/selective-nanobanana-0806/working-master-3001/g; s/geometry-only-outpaint-0806/working-master-3001/g; s/stable-nanobanana-3000/working-master-3001/g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
 cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" "$ROOT/ui_single_window/grid-ux-patch.js" > "$ROOT/app/web/app-v080.js"
 sed -i 's/Сгенерируйте окружение по всему canvas/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/g' "$ROOT/app/web/app-v080.js"
@@ -13,7 +13,7 @@ sed -i 's/Автоматически дорисуйте отсутствующе
 sed -i 's/Production policy: original resolution\./Рабочий master оптимизирован до размера генерации; исходный файл сохранён в архиве проекта./g' "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
 
-grep -q 'stable-nanobanana-3000' "$ROOT/app/web/index.html"
+grep -q 'working-master-3001' "$ROOT/app/web/index.html"
 grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
 grep -q 'const ZOOM_STEP = 0.05' "$ROOT/app/web/app-v080.js"
 grep -q 'requestGridFullscreen' "$ROOT/app/web/app-v080.js"
