@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Marins Facade — Workspace v0.8.1 Hybrid</title>
+  <link rel="stylesheet" href="/static/styles.css?v=hybrid-two-pass-3200">
+</head>
+<body>
+<div class="app-shell">
+  <header class="app-header">
+    <a class="brand" href="#" aria-label="Marins">
+      <img src="/static/marins-logo.svg?v=official-0803" alt="Marins" class="brand-logo">
+    </a>
+    <div class="header-context">
+      <span class="meta-label">ПРОЕКТ</span>
+      <strong id="header-project">Не выбран</strong>
+    </div>
+    <div class="system-meta">
+      <span class="meta-item"><i class="meta-label">MASTER</i><strong id="header-master">—</strong></span>
+      <span id="health" class="system-state"><i></i>Проверка системы</span>
+      <span class="version-mark">V0.8.1 HYBRID</span>
+    </div>
+  </header>
+
+  <nav id="pipeline" class="pipeline" aria-label="Этапы проекта">
+    <div class="pipeline-label"><span>WORKFLOW</span><small>FACADE PIPELINE</small></div>
+    <button data-stage="source"><small>01</small><span>ИСХОДНИК</span><b>locked</b></button>
+    <button data-stage="geometry"><small>02</small><span>ГЕОМЕТРИЯ</span><b>locked</b></button>
+    <button data-stage="environment"><small>03</small><span>ОКРУЖЕНИЕ</span><b>locked</b></button>
+    <button data-stage="final"><small>04</small><span>FINAL</span><b>locked</b></button>
+    <button data-stage="branding"><small>05</small><span>ВЫВЕСКА</span><b>locked</b></button>
+    <div class="pipeline-meta"><span>WORKING MASTER</span><small>GENERATION SCALE</small></div>
+  </nav>
+
+  <main class="workspace-layout">
+    <aside class="projects-pane">
+      <div class="pane-heading compact-heading">
+        <div><p class="eyebrow">PROJECTS</p><h2>Объекты</h2></div>
+        <button id="new-project" class="icon-button" title="Новый проект" aria-label="Новый проект">+</button>
+      </div>
+      <div id="project-list" class="project-list"></div>
+      <div class="projects-footer">
+        <div class="storage-note"><span>LOCAL STORAGE</span><strong id="project-count">0 проектов</strong></div>
+      </div>
+      <button id="new-project-bottom" class="hidden" type="button" aria-hidden="true"></button>
+    </aside>
+
+    <section class="work-pane">
+      <div id="empty-state" class="empty-state">
+        <p class="eyebrow">MARINS FACADE / SINGLE WINDOW</p>
+        <h1>Создайте проект</h1>
+        <p>Загрузите исходное изображение и управляйте всеми этапами в одном рабочем окне.</p>
+        <button id="empty-new-project" class="button button-primary">Новый проект</button>
+      </div>
+
+      <div id="project-workspace" class="project-workspace hidden">
+        <div class="workspace-titlebar">
+          <div class="workspace-title">
+            <p class="eyebrow">WORKSPACE / <span id="project-title">Проект</span></p>
+            <h1 id="active-stage-label">Геометрия</h1>
+          </div>
+          <div class="workspace-state"><span>ACTIVE STAGE</span><strong>EDIT / REVIEW / APPROVE</strong></div>
+        </div>
+
+        <div class="viewer-toolbar">
+          <div class="mode-tabs" role="tablist" aria-label="Представления активного этапа">
+            <button data-view="original">ОРИГИНАЛ</button>
+            <button data-view="grid">СЕТКА</button>
+            <button data-view="result">РЕЗУЛЬТАТ</button>
+            <button data-view="generation">ГЕНЕРАЦИЯ</button>
+            <button data-view="split">SPLIT</button>
+          </div>
+          <div class="zoom-tools">
+            <button id="zoom-out" title="Уменьшить">−</button>
+            <span id="zoom-value">FIT</span>
+            <button id="zoom-in" title="Увеличить">+</button>
+            <button id="fit-view">FIT</button>
+            <button id="actual-view">1:1</button>
+            <button id="fullscreen-view">FULL</button>
+          </div>
+        </div>
+
+        <div id="viewer" class="viewer">
+          <section id="source-panel" class="source-panel hidden">
+            <div><p class="eyebrow">SOURCE / ARCHIVED ORIGINAL + WORKING MASTER</p><h2>Исходное изображение</h2><p>Оригинал сохраняется в архиве проекта. Для сетки, геометрии и генерации используется облегчённый рабочий master.</p></div>
+            <label class="upload-control"><span>ВЫБЕРИТЕ ФАЙЛ</span><input id="source-file" type="file" accept="image/jpeg,image/png,image/webp"><button id="upload-source" type="button" class="button button-primary">Загрузить оригинал</button></label>
+            <div id="source-status" class="status-line">Файл не загружен.</div>
+          </section>
+
+          <div id="single-view" class="single-view hidden"><img id="single-image" alt="Изображение проекта"></div>
+
+          <div id="grid-view" class="grid-view hidden">
+            <div id="canvas-scroll" class="canvas-scroll"><canvas id="geometry-canvas"></canvas></div>
+            <div class="grid-legend"><span><i class="legend-dot"></i>4 точки главной плоскости фасада</span><span>Двойной щелчок — сброс</span></div>
+          </div>
+
+          <div id="split-view" class="split-view hidden">
+            <figure><figcaption id="split-before-label">ОРИГИНАЛ</figcaption><img id="split-before" alt="Предыдущее изображение"></figure>
+            <figure><figcaption id="split-after-label">РЕЗУЛЬТАТ</figcaption><img id="split-after" alt="Текущее изображение"></figure>
+          </div>
+        </div>
+
+        <div id="stage-actions" class="stage-actions">
+          <div class="action-context"><p class="eyebrow" id="action-stage-kicker">PERSPECTIVE GRID</p><strong id="action-stage-title">Совместите сетку с фасадом</strong></div>
+          <div id="source-actions" class="action-group hidden"><button id="source-replace" class="button button-secondary">Заменить исходник</button></div>
+          <div id="geometry-actions" class="action-group hidden">
+            <button id="geometry-reset" class="button button-secondary">Сброс</button>
+            <button id="geometry-undo" class="button button-secondary">Undo</button>
+            <button id="geometry-redo" class="button button-secondary">Redo</button>
+            <button id="geometry-apply" class="button button-primary">Применить</button>
+            <button id="geometry-approve" class="button button-dark">Утвердить</button>
+          </div>
+          <div id="environment-actions" class="action-group hidden">
+            <button id="environment-prompt" class="hidden" type="button" aria-hidden="true"></button>
+            <button id="environment-generate" class="button button-primary">Сгенерировать</button>
+            <button id="environment-approve" class="button button-dark">Утвердить</button>
+          </div>
+          <div id="final-actions" class="action-group hidden"><span class="action-message">Final формируется после утверждения окружения</span></div>
+          <div id="branding-actions" class="action-group hidden"><span class="action-message">Модуль вывески подключается к утверждённому Final</span></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="inspector-pane">
+      <div class="pane-heading compact-heading inspector-heading">
+        <div><p class="eyebrow">INSPECTOR</p><h2>Параметры</h2></div>
+        <span id="inspector-stage" class="stage-tag">Geometry</span>
+      </div>
+      <div class="inspector-tabs">
+        <button data-tab="comment" class="active">КОММЕНТАРИЙ</button>
+        <button data-tab="prompt">PROMPT</button>
+        <button data-tab="quality">QUALITY</button>
+        <button data-tab="diagnostics">DIAGNOSTICS</button>
+      </div>
+
+      <section class="inspector-panel active" data-panel="comment">
+        <label class="field"><span>КОММЕНТАРИЙ ПОЛЬЗОВАТЕЛЯ</span><textarea id="comment-input" placeholder="Опишите требуемую доработку. Комментарий станет обязательной частью compiled prompt."></textarea></label>
+        <div class="inspector-actions"><button id="adapt-comment" class="button button-primary">Обработать</button><strong id="comment-status">Комментариев нет</strong></div>
+      </section>
+
+      <section class="inspector-panel" data-panel="prompt">
+        <div class="inspector-actions"><button id="compile-prompt" class="button button-primary">Собрать prompt</button><span>MASTER + SKILL + COMMENTS</span></div>
+        <pre id="prompt-output" class="code-output">Prompt ещё не собран.</pre>
+      </section>
+
+      <section class="inspector-panel" data-panel="quality">
+        <div class="inspector-actions"><button id="run-quality" class="button button-primary">Запустить QC</button><span>CANVAS / OUTPAINT / COMPLIANCE</span></div>
+        <div id="quality-output" class="quality-output">Проверка ещё не выполнялась.</div>
+      </section>
+
+      <section class="inspector-panel" data-panel="diagnostics">
+        <div class="inspector-actions"><button id="refresh-diagnostics" class="button button-primary">Обновить</button><span>REQUEST / PROVIDER / TRANSPORT</span></div>
+        <pre id="diagnostics-output" class="code-output">Диагностика ещё не загружена.</pre>
+      </section>
+
+      <section class="inspector-panel hidden" data-panel="history" aria-hidden="true"><div id="history-output" class="history-output"></div></section>
+    </aside>
+
+    <section class="bottom-pane">
+      <div class="bottom-tabs">
+        <button data-bottom="timeline" class="active">ИСТОРИЯ</button>
+        <button data-bottom="candidates">КАНДИДАТЫ</button>
+        <button data-bottom="events">СОБЫТИЯ</button>
+      </div>
+      <div class="bottom-content active" data-bottom-panel="timeline"><div id="timeline-list" class="timeline-list"></div></div>
+      <div class="bottom-content" data-bottom-panel="candidates"><div id="candidate-list" class="candidate-list"></div></div>
+      <div class="bottom-content" data-bottom-panel="events"><pre id="events-output" class="events-output">События отсутствуют.</pre></div>
+    </section>
+  </main>
+</div>
+
+<div id="error-modal" class="modal hidden"><div class="modal-card"><p class="eyebrow">ОШИБКА</p><h3 id="error-title">Операция не выполнена</h3><pre id="error-text"></pre><button id="error-close" class="button button-primary">Закрыть</button></div></div>
+<script src="/static/app-v080.js?v=hybrid-two-pass-3200"></script>
+</body>
+</html>
