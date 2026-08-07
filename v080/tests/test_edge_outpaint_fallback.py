@@ -31,7 +31,12 @@ def test_white_outpaint_is_recorded_for_fallback_instead_of_raising(tmp_path: Pa
         geometry_image=geometry,
         outpaint_mask=plan,
         prepared={
-            "content_box_normalized": [0.0, 0.0, 1.0, 1.0],
+            "content_box_normalized": {
+                "x": 0.0,
+                "y": 0.0,
+                "width": 1.0,
+                "height": 1.0,
+            },
             "effective_mask_path": str(plan),
             "requested_generation_mode": "outpaint",
             "generation_mode": "outpaint",
