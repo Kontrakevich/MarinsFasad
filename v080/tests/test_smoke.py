@@ -11,7 +11,7 @@ def test_health():
     response = client.get('/api/health')
     assert response.status_code == 200
     payload = response.json()
-    assert payload['version'] == '0.8.0'
+    assert payload['version'] == '0.8.1'
     assert payload['runtime'] == 'standalone-v080'
     assert payload['generation_mode'] == 'background-job-polling'
     assert payload['image_model'] == 'google/gemini-2.5-flash-image'
@@ -19,7 +19,7 @@ def test_health():
     assert payload['outpaint_detection'] == 'automatic-from-approved-geometry'
 
     engine = OpenRouterImageEngine()
-    assert OpenRouterImageEngine.transport_engine_version == '3.1.0'
+    assert OpenRouterImageEngine.transport_engine_version == '3.2.0'
     assert engine.required_model == 'google/gemini-2.5-flash-image'
     assert engine.default_generation_mode == 'hybrid'
     assert engine.available_generation_modes == ('hybrid', 'edit', 'outpaint')
@@ -30,7 +30,7 @@ def test_health():
     assert engine.provider_input_policy == 'single-approved-geometry-reference'
     assert engine.outpaint_qc_blocking is False
     assert engine.missing_region_transport_policy == 'native-transparency-single-reference'
-    assert engine.outpaint_repair_mode == 'single-pass'
+    assert engine.outpaint_repair_mode == 'hybrid-second-pass'
     assert ENVIRONMENT_SYSTEM_PROMPT
     assert PROMPT_CONTRACT_VERSION == 'environment-system-v1.5-hybrid'
 
