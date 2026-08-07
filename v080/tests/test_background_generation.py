@@ -12,7 +12,6 @@ client = TestClient(app)
 
 def test_environment_generation_uses_background_job_and_short_status_requests():
     main = (ROOT / "app" / "main.py").read_text("utf-8")
-
     assert "threading.Thread(" in main
     assert 'status_code=202' in main
     assert '/environment/generation-status' in main
@@ -50,20 +49,29 @@ def test_generation_start_returns_202_without_waiting_for_provider(monkeypatch):
     stored = projects.read(project_id)
     assert stored["generation"]["input"] == "approved-geometry-only"
     assert stored["generation"]["outpaint_detection"] == "automatic"
-    assert "geometry_outpaint_mask" not in stored["assets"]
 
     status = client.get(payload["status_url"])
     assert status.status_code == 200
     assert status.json()["status"] == "queued"
 
 
+def test_legacy_project_mask_key_is_removed_from_client_state():
+    project = projects.create("Legacy migration test")
+    project_id = project["id"]
+    state = projects.read(project_id)
+    state["assets"]["geometry_outpaint_mask"] = "obsolete.png"
+    projects.write(project_id, state)
+
+    response = client.get(f"/api/projects/{project_id}")
+    assert response.status_code == 200
+    assert "geometry_outpaint_mask" not in response.json().get("assets", {})
+
+
 def test_environment_generation_worker_persists_success_and_failure_states():
     main = (ROOT / "app" / "main.py").read_text("utf-8")
-
     assert '"EnvironmentGenerationQueued"' in main
     assert '"EnvironmentGenerationCompleted"' in main
     assert '"EnvironmentGenerationFailed"' in main
     assert 'state["pipeline"]["environment"] = "processing"' in main
     assert 'state["pipeline"]["environment"] = "error"' in main
     assert "OutpaintPlanEngine" in main
-    assert "geometry_outpaint_mask" not in main
