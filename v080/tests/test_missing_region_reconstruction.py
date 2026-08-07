@@ -46,16 +46,20 @@ def test_hybrid_reapplies_original_missing_alpha_between_passes(tmp_path: Path) 
         assert result.getpixel((40, 30)) == (120, 150, 180, 255)
 
 
-def test_internal_second_pass_is_outpaint_only() -> None:
+def test_internal_second_pass_is_outpaint_only_but_keeps_full_prompt_context() -> None:
     engine = OpenRouterImageEngine()
     source_prompt = (
         "OPERATOR PROMPT — EXECUTE EXACTLY\n"
         "1. Убрать столбы и провода.\n"
-        "2. Сделать облачную погоду.\n\n"
-        "GENERATION MODE\nHYBRID"
+        "2. Сделать облачную погоду.\n"
+        "3. Продолжить мокрый асфальт.\n\n"
+        "GENERATION MODE\nHYBRID\n\n"
+        "GENERATION QUALITY\nHIGH"
     )
     prompt = engine._internal_outpaint_prompt(source_prompt)
     assert "INTERNAL HYBRID PASS 2/2 — OUTPAINT ONLY" in prompt
     assert "GENERATION MODE\nOUTPAINT" in prompt
-    assert "Existing visible pixels" in prompt
-    assert "ALREADY EXECUTED IN PASS 1" in prompt
+    assert "GENERATION QUALITY\nHIGH" in prompt
+    assert "FULL ORIGINAL COMPILED PROMPT — MANDATORY CONTEXT" in prompt
+    assert source_prompt in prompt
+    assert "same photograph" in prompt.lower()
