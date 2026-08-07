@@ -1,10 +1,10 @@
 {
-  "name": "Marins Facade v0.8.0",
+  "name": "Marins Facade v0.8.1",
   "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
   "forwardPorts": [8070],
   "portsAttributes": {
     "8070": {
-      "label": "Marins Facade Control Center v0.8.0",
+      "label": "Marins Facade Control Center v0.8.1",
       "onAutoForward": "openBrowser",
       "visibility": "private"
     }
