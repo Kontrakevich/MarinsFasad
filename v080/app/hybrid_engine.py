@@ -27,12 +27,11 @@ AIEngineError = _engine_module.AIEngineError
 class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
     """Single active v0.8.1 runtime: strong image edit + automatic outpaint.
 
-    Modes:
-    - edit: one strong semantic image-edit pass;
-    - outpaint: one reconstruction pass, composited only into missing regions;
-    - hybrid: primary semantic edit pass, then a second outpaint-only pass when
-      missing regions exist. The original geometry alpha is reapplied between
-      passes, so the second pass cannot erase or reinterpret completed edits.
+    EDIT performs one strong semantic image-edit pass.
+    OUTPAINT reconstructs only missing transparent regions and preserves all
+    existing visible pixels exactly.
+    HYBRID performs the primary semantic edit first, reapplies the original
+    missing-alpha geometry, then runs a dedicated OUTPAINT-only second pass.
     """
 
     transport_engine_version = "3.2.0"
@@ -50,8 +49,8 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
     outpaint_tile_max_calls = 0
     outpaint_tile_planner = "disabled"
     missing_region_transport_policy = "native-transparency-single-reference"
-    outpaint_qc_blocking = False
-    outpaint_qc_policy = "warning-only"
+    outpaint_qc_blocking = True
+    outpaint_qc_policy = "reject-solid-white-black-placeholder"
 
     _runtime = threading.local()
 
@@ -100,7 +99,9 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
     def _provider_prompt(self, prompt: str) -> tuple[str, bool]:
         exact = self._clean_prompt(prompt)
         is_ui_compiled = OPERATOR_PROMPT_MARKER in exact and FINAL_COMMAND_MARKER in exact
-        if is_ui_compiled or ENVIRONMENT_SYSTEM_PROMPT in exact:
+        # A prompt containing an explicit generation-mode marker is already a
+        # complete execution contract. Never prepend another conflicting mode.
+        if is_ui_compiled or ENVIRONMENT_SYSTEM_PROMPT in exact or GENERATION_MODE_MARKER in exact:
             return exact, is_ui_compiled
         return (
             f"SYSTEM PROMPT — {PROMPT_CONTRACT_VERSION}\n"
@@ -277,6 +278,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 "Не найден утверждённый результат коррекции геометрии.",
                 details={"provider_call_made": False, "credits_spent": False},
             )
+
         approval = self._approval_contract(geometry_image)
         private_plan, outpaint_stats = self._derive_outpaint_plan(
             geometry_image,
@@ -338,6 +340,33 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         binary = mask.convert("L").point(lambda value: 255 if value >= 128 else 0, mode="L")
         return int(sum(binary.histogram()[128:]))
 
+    @staticmethod
+    def _outpaint_placeholder_stats(candidate: Image.Image, plan: Image.Image) -> dict[str, Any]:
+        plan_array = np.asarray(
+            plan.convert("L").point(lambda value: 255 if value >= 128 else 0, mode="L"),
+            dtype=np.uint8,
+        )
+        editable = plan_array > 0
+        editable_pixels = int(np.count_nonzero(editable))
+        if editable_pixels == 0:
+            return {
+                "outpaint_checked_pixels": 0,
+                "solid_white_ratio": 0.0,
+                "solid_black_ratio": 0.0,
+                "outpaint_placeholder_detected": False,
+            }
+        rgb = np.asarray(candidate.convert("RGB"), dtype=np.uint8)
+        values = rgb[editable]
+        white_ratio = float(np.count_nonzero(np.all(values >= 248, axis=1))) / float(editable_pixels)
+        black_ratio = float(np.count_nonzero(np.all(values <= 7, axis=1))) / float(editable_pixels)
+        detected = white_ratio >= 0.95 or black_ratio >= 0.95
+        return {
+            "outpaint_checked_pixels": editable_pixels,
+            "solid_white_ratio": round(white_ratio, 6),
+            "solid_black_ratio": round(black_ratio, 6),
+            "outpaint_placeholder_detected": detected,
+        }
+
     def _promote_provider_output(
         self,
         *,
@@ -397,11 +426,26 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                         "outside_changed_pixels": outside_changed_pixels,
                     },
                 )
+            placeholder = self._outpaint_placeholder_stats(candidate, outpaint_plan)
+            if placeholder["outpaint_placeholder_detected"]:
+                raise AIEngineError(
+                    "Nano Banana не реконструировала отсутствующие участки изображения: обнаружена сплошная белая или чёрная заливка.",
+                    details={
+                        "reason": "outpaint_placeholder_detected",
+                        **placeholder,
+                    },
+                )
             full_frame_semantic_edit = False
             preservation_policy = "pixel-exact-outside-missing-regions"
         else:
             candidate = generated_master
             outside_changed_pixels = None
+            placeholder = {
+                "outpaint_checked_pixels": 0,
+                "solid_white_ratio": 0.0,
+                "solid_black_ratio": 0.0,
+                "outpaint_placeholder_detected": False,
+            }
             full_frame_semantic_edit = True
             preservation_policy = "prompt-enforced-corrected-architecture"
 
@@ -432,6 +476,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             "generation_mode": requested_mode,
             "full_frame_semantic_edit": full_frame_semantic_edit,
             "strong_image_edit_enabled": requested_mode in {"hybrid", "edit"},
+            **placeholder,
         }
 
     @staticmethod
@@ -448,7 +493,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         return (
             "INTERNAL HYBRID PASS 2/2 — OUTPAINT ONLY\n"
             "The supplied image is the completed semantic image-edit result. Existing visible pixels, weather, lighting, object removals and all operator edits are final and immutable.\n"
-            "Only reconstruct pixels where the supplied image has no visual information (transparent regions created by perspective correction).\n"
+            "Only reconstruct pixels where the supplied image has no visual information: transparent regions created by perspective correction.\n"
             "Continue adjacent sky, facade edges, buildings, pavement, vegetation, shadows and urban context photorealistically with matching perspective and lighting.\n"
             "Do not undo, reinterpret, recolour or geometrically modify any existing visible area. Do not return blank, white, black or flat-colour wedges.\n\n"
             f"{GENERATION_MODE_MARKER}\nOUTPAINT\n\n"
