@@ -29,17 +29,21 @@ cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/
 sed -i 's/Сгенерируйте окружение по всему canvas/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Внесите только указанные точечные изменения через Nano Banana/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Автоматически дорисуйте отсутствующее окружение/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/g' "$ROOT/app/web/app-v080.js"
+sed -i 's/Production policy: original resolution\./Рабочий master оптимизирован до размера генерации; исходный файл сохранён в архиве проекта./g' "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
 
 grep -q 'const ZOOM_STEP = 0.05' "$ROOT/app/web/app-v080.js"
 grep -q 'requestGridFullscreen' "$ROOT/app/web/app-v080.js"
+grep -q 'Рабочий master оптимизирован до размера генерации' "$ROOT/app/web/app-v080.js"
 
 python -B - "$EXPECTED_TRANSPORT_ENGINE" "$EXPECTED_MODEL" <<'PY'
 import sys
 from app.ai_engine import OpenRouterImageEngine
+from app.image_engine import ImageEngine
 
 expected_engine, expected_model = sys.argv[1:3]
 engine = OpenRouterImageEngine()
+image_engine = ImageEngine()
 if OpenRouterImageEngine.transport_engine_version != expected_engine:
     raise SystemExit(
         f"Transport engine mismatch: expected {expected_engine}, got {OpenRouterImageEngine.transport_engine_version}"
@@ -56,6 +60,8 @@ if engine.user_mask_required is not False:
     raise SystemExit("User mask must not exist")
 if engine.internal_outpaint_tiles_allowed is not False:
     raise SystemExit("Legacy tiled repair must be disabled")
+if image_engine._generation_canvas(8064, 6048) != engine._select_provider_size(8064, 6048):
+    raise SystemExit("Working-master scale does not match generation scale")
 print("Stable engine 3.0.0 verified")
 print(f"Image model locked: {engine.model}")
 print("Environment input: approved geometry only")
@@ -63,6 +69,8 @@ print("Outpaint: automatic from missing transparent regions")
 print("Prompt: UI compiled prompt is authoritative")
 print("Grid zoom step: 5%")
 print("Grid fullscreen: automatic on grid interaction")
+print("Working master: reduced before Perspective Grid to generation input scale")
+print("Original source: archived without modification")
 print("Legacy policy chain: disabled")
 PY
 
@@ -105,6 +113,7 @@ PY
       echo "Transport engine: $EXPECTED_TRANSPORT_ENGINE"
       echo "Image model: $EXPECTED_MODEL"
       echo "Runtime policy: single stable engine"
+      echo "Working master: generation-sized before Perspective Grid"
       cat "$HEALTH_FILE"
       exit 0
     fi
