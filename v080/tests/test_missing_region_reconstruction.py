@@ -5,7 +5,7 @@ from PIL import Image
 from app.ai_engine import OpenRouterImageEngine
 
 
-def test_missing_regions_are_transmitted_as_opaque_service_markers() -> None:
+def test_missing_regions_stay_transparent_in_provider_reference() -> None:
     engine = OpenRouterImageEngine()
     geometry = Image.new("RGBA", (24, 16), (40, 60, 80, 255))
     geometry.paste((0, 0, 0, 0), (0, 0, 6, 16))
@@ -18,12 +18,13 @@ def test_missing_regions_are_transmitted_as_opaque_service_markers() -> None:
         (24, 16),
     )
 
-    missing_pixel = transport_geometry.convert("RGB").getpixel((2, 8))
-    protected_pixel = transport_geometry.convert("RGB").getpixel((12, 8))
-    assert missing_pixel in {(255, 0, 255), (0, 255, 255)}
-    assert protected_pixel == (40, 60, 80)
+    missing_pixel = transport_geometry.getpixel((2, 8))
+    protected_pixel = transport_geometry.getpixel((12, 8))
+    assert missing_pixel[3] == 0
+    assert protected_pixel[:3] == (40, 60, 80)
+    assert protected_pixel[3] == 255
     assert transport_plan.getpixel((2, 8)) == 255
-    assert engine.missing_region_transport_policy == "opaque-marker-single-pass"
+    assert engine.missing_region_transport_policy == "native-transparency-single-reference"
     assert engine.outpaint_repair_mode == "single-pass"
 
 
