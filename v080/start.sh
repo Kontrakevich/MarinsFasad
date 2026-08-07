@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="/tmp/marins-facade-v080.pid"
 LOG_FILE="/tmp/marins-facade-v080.log"
 HEALTH_FILE="/tmp/marins-facade-v080-health.json"
-EXPECTED_TRANSPORT_ENGINE="2.9.0"
+EXPECTED_TRANSPORT_ENGINE="2.9.1"
 EXPECTED_PROMPT_CONTRACT="environment-system-v1.4"
 EXPECTED_MODEL="google/gemini-2.5-flash-image"
 
@@ -52,7 +52,8 @@ grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
 grep -q 'approved-geometry-only' "$ROOT/app/main.py"
 grep -q 'automatic-from-approved-geometry' "$ROOT/app/main.py"
 grep -q 'single-approved-geometry-reference' "$ROOT/app/prompt_enforcement_policy.py"
-grep -q 'transport_engine_version = "2.9.0"' "$ROOT/app/geometry_only_outpaint_policy.py"
+grep -q 'transport_engine_version = "2.9.1"' "$ROOT/app/geometry_only_outpaint_policy.py"
+grep -q 'internal-derived-outpaint-tile' "$ROOT/app/geometry_only_outpaint_policy.py"
 ! grep -q 'geometry_outpaint_mask' "$ROOT/app/main.py"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
@@ -78,6 +79,8 @@ if engine.outpaint_detection_policy != "automatic-from-approved-geometry-transpa
     raise SystemExit("Automatic outpaint detection is not active")
 if engine.user_mask_required is not False:
     raise SystemExit("A user mask must never be required")
+if engine.internal_outpaint_tiles_allowed is not True:
+    raise SystemExit("Internal outpaint tiles must be allowed")
 if engine.provider_input_policy != "single-approved-geometry-reference":
     raise SystemExit("Nano Banana must receive one geometry reference")
 health_payload = health()
@@ -91,6 +94,7 @@ print(f"Image model locked: {engine.model}")
 print("Environment input: approved corrected geometry only")
 print("Outpaint detection: automatic from missing transparent regions")
 print("User mask: does not exist")
+print("Internal outpaint tiles: derived from approved geometry and allowed")
 print("Provider input: one approved geometry reference")
 PY
 
