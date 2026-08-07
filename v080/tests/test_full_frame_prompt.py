@@ -24,15 +24,33 @@ def test_hybrid_prompt_allows_strong_environment_edit_without_geometry_drift(tmp
     assert result["generation_mode"] == "hybrid"
     assert result["outpaint_detection"] == "automatic-from-approved-geometry"
     assert result["provider_model"] == "google/gemini-2.5-flash-image"
-    assert result["pixel_preservation"] == "architecture-geometry-preserved-by-prompt"
+    assert result["pixel_preservation"] == "geometry-preserved-requested-edits-retained"
     assert "GENERATION MODE\nHYBRID" in prompt
-    assert "global weather/atmosphere changes" in prompt
+    assert "scene-wide lighting" in prompt.lower()
     assert "poles" in prompt.lower()
     assert "overhead wires" in prompt.lower()
     assert "Regenerate the whole image." not in prompt
     assert "Убрать столбы и провода." in prompt
     assert "Сделать пасмурную погоду и мокрый асфальт." in prompt
     assert "mask" not in prompt.lower()
+
+
+def test_relight_mode_allows_full_frame_photometric_change(tmp_path: Path):
+    result = PromptEngine().compile(
+        PromptContext(
+            stage="environment",
+            master_prompt="ignored",
+            comments=[
+                "__MARINS_GENERATION_MODE__:relight",
+                "Сделать вечернее освещение и тёплый свет в окнах.",
+            ],
+        ),
+        tmp_path,
+    )
+    assert result["generation_mode"] == "relight"
+    assert result["pixel_preservation"] == "geometry-preserved-photometry-may-change"
+    assert "GENERATION MODE\nRELIGHT" in result["prompt"]
+    assert "Do NOT restore original source pixels after relighting" in result["prompt"]
 
 
 def test_outpaint_mode_restores_strict_pixel_preservation(tmp_path: Path):
