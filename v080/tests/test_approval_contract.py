@@ -27,10 +27,6 @@ def create_project_geometry(root: Path, approved: bool) -> Path:
     return geometry
 
 
-def test_exact_approved_geometry_is_accepted():
-    pass
-
-
 def test_exact_approved_geometry_is_accepted_without_extra_project_asset(tmp_path):
     geometry = create_project_geometry(tmp_path, approved=True)
     result = OpenRouterImageEngine()._approval_contract(geometry)
