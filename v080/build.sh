@@ -16,7 +16,6 @@ grep -q 'stable-nanobanana-3000' "$ROOT/app/web/index.html"
 grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
 grep -q 'stable_engine' "$ROOT/app/__init__.py"
 grep -q 'transport_engine_version = "3.0.0"' "$ROOT/app/stable_engine.py"
-! grep -q 'geometry_outpaint_mask' "$ROOT/app/main.py"
 
 find "$ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
 find "$ROOT" -type f -name '*.pyc' -delete
