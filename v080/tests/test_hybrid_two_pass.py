@@ -10,6 +10,7 @@ HYBRID_PROMPT = (
     "1. Убрать столбы и провода.\n"
     "2. Сделать облачную погоду.\n\n"
     "GENERATION MODE\nHYBRID\n\n"
+    "GENERATION QUALITY\nSTANDARD\n\n"
     "FINAL COMMAND — EXECUTE THE OPERATOR PROMPT\n"
     "Убрать столбы и провода. Сделать облачную погоду."
 )
@@ -73,9 +74,12 @@ def test_hybrid_runs_semantic_edit_then_outpaint(monkeypatch, tmp_path: Path) ->
     assert calls[0]["prompt"] == HYBRID_PROMPT
     assert "INTERNAL HYBRID PASS 2/2 — OUTPAINT ONLY" in calls[1]["prompt"]
     assert "GENERATION MODE\nOUTPAINT" in calls[1]["prompt"]
+    assert "FULL ORIGINAL COMPILED PROMPT — MANDATORY CONTEXT" in calls[1]["prompt"]
+    assert HYBRID_PROMPT in calls[1]["prompt"]
     assert result["hybrid_two_pass"] is True
     assert result["provider_call_count"] == 2
     assert result["generation_mode"] == "hybrid"
+    assert result["generation_quality"] == "standard"
 
     intermediate = Path(result["hybrid_intermediate"])
     with Image.open(intermediate) as image:
@@ -122,3 +126,4 @@ def test_hybrid_skips_second_call_when_no_outpaint_is_needed(monkeypatch, tmp_pa
     assert result["provider_call_count"] == 1
     assert result["hybrid_two_pass"] is False
     assert result["outpaint_second_pass_skipped"] is True
+    assert result["generation_quality"] == "standard"
