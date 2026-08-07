@@ -21,6 +21,10 @@
     return Object.prototype.hasOwnProperty.call(MODES, mode) ? mode : 'hybrid';
   }
 
+  function isModeComment(item) {
+    return String(item?.text || '').trim().toLowerCase().startsWith(MODE_PREFIX.toLowerCase());
+  }
+
   function projectMode(project) {
     let mode = 'hybrid';
     for (const item of project?.comments || []) {
@@ -29,6 +33,20 @@
       mode = normalizeMode(text.slice(MODE_PREFIX.length));
     }
     return mode;
+  }
+
+  function scheduleVisibleCommentCount(project) {
+    const visibleCount = (project?.comments || []).filter(
+      item => item?.stage === 'environment' && !isModeComment(item)
+    ).length;
+    requestAnimationFrame(() => {
+      const environmentActive = !document.getElementById('environment-actions')?.classList.contains('hidden');
+      const node = document.getElementById('comment-status');
+      if (!environmentActive || !node) return;
+      node.textContent = visibleCount
+        ? `${visibleCount} комментариев включено в prompt`
+        : 'Комментариев нет';
+    });
   }
 
   function installControl() {
@@ -92,6 +110,7 @@
       const project = await readProject(projectId);
       if (project) {
         activeProjectId = projectId;
+        scheduleVisibleCommentCount(project);
         const stored = projectMode(project);
         if (stored === requested) return;
       }
@@ -105,6 +124,8 @@
         const text = await response.text();
         throw new Error(text || `Не удалось сохранить режим генерации: HTTP ${response.status}`);
       }
+      const updated = await responseJson(response);
+      if (updated) scheduleVisibleCommentCount(updated);
     })();
 
     try {
@@ -136,6 +157,7 @@
         if (project?.id) {
           activeProjectId = project.id;
           if (modeSelect) modeSelect.value = projectMode(project);
+          scheduleVisibleCommentCount(project);
         }
       }
     }
