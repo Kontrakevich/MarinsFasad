@@ -7,10 +7,15 @@ from typing import Any
 
 import cv2
 import numpy as np
-from PIL import Image, ImageChops, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageOps
 
 from . import ai_engine as _engine_module
-from .prompt_engine import FINAL_COMMAND_MARKER, OPERATOR_PROMPT_MARKER
+from .prompt_engine import (
+    FINAL_COMMAND_MARKER,
+    GENERATION_MODE_MARKER,
+    OPERATOR_PROMPT_MARKER,
+    VALID_GENERATION_MODES,
+)
 from .system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
 
 
@@ -19,47 +24,37 @@ AIEngineError = _engine_module.AIEngineError
 
 
 class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
-    """Single runtime engine for v0.8.
+    """Single hybrid runtime engine for v0.8.
 
-    Contract:
-    - the user approves only the corrected geometry image;
-    - missing surroundings are detected from its alpha channel;
-    - Nano Banana is the only image model;
-    - the UI-compiled prompt is sent verbatim;
-    - Nano Banana receives one visual reference;
-    - existing source pixels are restored outside automatic outpaint and compact
-      prompt-driven local changes.
+    Geometry remains the approved corrected base. Nano Banana receives exactly
+    one visual reference. The selected generation mode controls final promotion:
 
-    Older policy modules are intentionally not part of the runtime chain.
+    - HYBRID: strong full-frame semantic image edit + automatic outpaint.
+    - EDIT: strong semantic image edit; operator request has priority.
+    - OUTPAINT: generated pixels are accepted only where information is missing.
+
+    No coloured service pattern is sent to the model. Missing information stays
+    transparent in the visual reference and is detected privately by the app.
     """
 
-    transport_engine_version = "3.0.0"
+    transport_engine_version = "3.1.0"
     required_model = "google/gemini-2.5-flash-image"
-    generation_mode = "automatic-outpaint-and-selective-edit"
+    default_generation_mode = "hybrid"
+    generation_mode = "hybrid"
+    available_generation_modes = ("hybrid", "edit", "outpaint")
     environment_input_policy = "approved-geometry-only"
     outpaint_detection_policy = "automatic-from-approved-geometry-transparency"
     provider_input_policy = "single-approved-geometry-reference"
     prompt_transport_policy = "ui-compiled-prompt-sent-verbatim"
     user_mask_required = False
 
-    # Stable single-pass policy. These compatibility attributes are retained so
-    # diagnostics/tests from previous builds can still inspect the engine without
-    # activating the old tiled-repair pipeline.
     internal_outpaint_tiles_allowed = False
     outpaint_repair_mode = "single-pass"
     outpaint_tile_max_calls = 0
     outpaint_tile_planner = "disabled"
-    missing_region_transport_policy = "opaque-marker-single-pass"
+    missing_region_transport_policy = "native-transparency-single-reference"
     outpaint_qc_blocking = False
     outpaint_qc_policy = "warning-only"
-
-    semantic_difference_threshold = 32
-    minimum_component_pixels = 96
-    maximum_component_edit_ratio = 0.08
-    maximum_component_bbox_ratio = 0.25
-    maximum_total_selective_edit_ratio = 0.15
-    maximum_component_count = 12
-    component_padding_px = 4
 
     def __init__(self) -> None:
         super().__init__()
@@ -68,6 +63,26 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
     @staticmethod
     def _prompt_sha256(prompt: str) -> str:
         return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _normalize_generation_mode(cls, value: str | None) -> str:
+        mode = str(value or "").strip().lower()
+        return mode if mode in VALID_GENERATION_MODES else cls.default_generation_mode
+
+    @classmethod
+    def _mode_from_prompt(cls, prompt: str) -> str:
+        text = str(prompt or "")
+        marker = f"{GENERATION_MODE_MARKER}\n"
+        index = text.find(marker)
+        if index >= 0:
+            remainder = text[index + len(marker):]
+            first_line = remainder.splitlines()[0].strip().lower() if remainder else ""
+            if first_line in VALID_GENERATION_MODES:
+                return first_line
+        for mode in ("hybrid", "edit", "outpaint"):
+            if f"Generation mode: {mode.upper()}" in text:
+                return mode
+        return cls.default_generation_mode
 
     @staticmethod
     def _clean_prompt(prompt: str) -> str:
@@ -94,6 +109,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         return (
             f"SYSTEM PROMPT — {PROMPT_CONTRACT_VERSION}\n"
             f"{ENVIRONMENT_SYSTEM_PROMPT}\n\n"
+            f"{GENERATION_MODE_MARKER}\nHYBRID\n\n"
             "PROJECT EXECUTION PROMPT\n"
             f"{exact}",
             False,
@@ -166,7 +182,10 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         }
 
     @staticmethod
-    def _derive_outpaint_plan(geometry_image: Path, destination: Path) -> tuple[Path, dict[str, Any]]:
+    def _derive_outpaint_plan(
+        geometry_image: Path,
+        destination: Path,
+    ) -> tuple[Path, dict[str, Any]]:
         with Image.open(geometry_image) as source:
             geometry = ImageOps.exif_transpose(source).convert("RGBA")
         alpha = np.asarray(geometry.getchannel("A"), dtype=np.uint8)
@@ -178,7 +197,11 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             iterations=1,
         )
         destination.parent.mkdir(parents=True, exist_ok=True)
-        Image.fromarray(missing, mode="L").save(destination, format="PNG", optimize=False)
+        Image.fromarray(missing, mode="L").save(
+            destination,
+            format="PNG",
+            optimize=False,
+        )
         missing_pixels = int(np.count_nonzero(missing))
         total_pixels = max(1, geometry.width * geometry.height)
         return destination, {
@@ -188,15 +211,11 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             "outpaint_detection": "automatic-from-approved-geometry-transparency",
         }
 
+    # Compatibility helper retained for diagnostics. It is no longer used for
+    # model transport; coloured markers were removed in Hybrid Engine 3.1.
     @staticmethod
     def _missing_region_marker(size: tuple[int, int]) -> Image.Image:
-        width, height = size
-        y, x = np.indices((height, width))
-        checker = ((x // 16 + y // 16) % 2).astype(np.uint8)
-        array = np.zeros((height, width, 3), dtype=np.uint8)
-        array[checker == 0] = (255, 0, 255)
-        array[checker == 1] = (0, 255, 255)
-        return Image.fromarray(array, mode="RGB")
+        return Image.new("RGB", size, (127, 127, 127))
 
     @classmethod
     def _reference_canvases(
@@ -205,6 +224,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         mask_master: Image.Image,
         reference_size: tuple[int, int],
     ) -> tuple[Image.Image, Image.Image, tuple[int, int, int, int]]:
+        """Keep missing geometry genuinely transparent for Nano Banana."""
         left, top, content_width, content_height = cls._fit_content_box(
             geometry_master.size,
             reference_size,
@@ -217,20 +237,11 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             (content_width, content_height),
             Image.Resampling.NEAREST,
         ).point(lambda value: 255 if value >= 128 else 0, mode="L")
-        alpha_missing = geometry_resized.getchannel("A").point(
-            lambda value: 255 if value < 250 else 0,
-            mode="L",
-        )
-        missing = ImageChops.lighter(private_plan, alpha_missing)
 
-        base_rgb = geometry_resized.convert("RGB")
-        marker = cls._missing_region_marker((content_width, content_height))
-        marked = Image.composite(marker, base_rgb, missing)
-
-        geometry_canvas = cls._missing_region_marker(reference_size)
-        geometry_canvas.paste(marked, (left, top))
+        geometry_canvas = Image.new("RGBA", reference_size, (0, 0, 0, 0))
+        geometry_canvas.paste(geometry_resized, (left, top))
         plan_canvas = Image.new("L", reference_size, 0)
-        plan_canvas.paste(missing, (left, top))
+        plan_canvas.paste(private_plan, (left, top))
         return geometry_canvas, plan_canvas, (left, top, content_width, content_height)
 
     def _build_payload(
@@ -278,6 +289,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 "Не найден утверждённый результат коррекции геометрии.",
                 details={"provider_call_made": False, "credits_spent": False},
             )
+
         approval = self._approval_contract(geometry_image)
         private_plan, outpaint_stats = self._derive_outpaint_plan(
             geometry_image,
@@ -285,6 +297,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         )
         exact_prompt = self._clean_prompt(prompt)
         provider_prompt, is_ui_compiled = self._provider_prompt(exact_prompt)
+        requested_mode = self._mode_from_prompt(exact_prompt)
 
         prepared = super().prepare_environment_inputs(
             prompt=exact_prompt,
@@ -297,6 +310,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             forced_target_request_bytes=forced_target_request_bytes,
             supported_sizes=supported_sizes,
         )
+
         sent_prompt_path = output_dir / "compiled-prompt-sent.txt"
         sent_prompt_path.write_text(provider_prompt + "\n", "utf-8")
         prepared.update(approval)
@@ -306,14 +320,21 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 "model": self.required_model,
                 "model_lock": "nano-banana-only",
                 "transport_engine_version": self.transport_engine_version,
-                "generation_mode": self.generation_mode,
+                "generation_mode": requested_mode,
+                "requested_generation_mode": requested_mode,
+                "available_generation_modes": list(self.available_generation_modes),
                 "environment_input_policy": self.environment_input_policy,
                 "outpaint_detection": self.outpaint_detection_policy,
                 "provider_input_policy": self.provider_input_policy,
                 "provider_reference_count": 1,
                 "input_reference_count": 1,
                 "user_outpaint_file_required": False,
-                "pixel_preservation_required": True,
+                "pixel_preservation_required": requested_mode == "outpaint",
+                "geometry_preservation_policy": (
+                    "pixel-exact-outside-missing-regions"
+                    if requested_mode == "outpaint"
+                    else "prompt-enforced-corrected-architecture"
+                ),
                 "effective_mask_path": str(private_plan),
                 "system_prompt_contract": PROMPT_CONTRACT_VERSION,
                 "prompt_transport_policy": self.prompt_transport_policy,
@@ -324,6 +345,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 "compiled_prompt_sent_sha256": self._prompt_sha256(provider_prompt),
                 "ui_compiled_prompt": is_ui_compiled,
                 "prompt_match": exact_prompt == provider_prompt,
+                "visual_reference_policy": "native-alpha-no-service-colour-pattern",
             }
         )
         (output_dir / "transport.json").write_text(
@@ -334,98 +356,11 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
 
     @staticmethod
     def _pixel_count(mask: Image.Image) -> int:
-        binary = mask.convert("L").point(lambda v: 255 if v >= 128 else 0, mode="L")
-        return int(sum(binary.histogram()[128:]))
-
-    def _local_change_mask(
-        self,
-        generated: Image.Image,
-        approved: Image.Image,
-        outpaint_plan: Image.Image,
-    ) -> tuple[Image.Image, dict[str, Any]]:
-        difference = ImageChops.difference(
-            generated.convert("RGB"),
-            approved.convert("RGB"),
-        )
-        red, green, blue = difference.split()
-        maximum = ImageChops.lighter(ImageChops.lighter(red, green), blue)
-        changed = maximum.point(
-            lambda value: 255 if value >= self.semantic_difference_threshold else 0,
-            mode="L",
-        ).filter(ImageFilter.MedianFilter(3))
-
-        mandatory = outpaint_plan.convert("L").point(
+        binary = mask.convert("L").point(
             lambda value: 255 if value >= 128 else 0,
             mode="L",
         )
-        changed = ImageChops.multiply(changed, ImageOps.invert(mandatory))
-        array = np.asarray(changed, dtype=np.uint8)
-        array = cv2.morphologyEx(
-            array,
-            cv2.MORPH_OPEN,
-            np.ones((3, 3), dtype=np.uint8),
-            iterations=1,
-        )
-        array = cv2.morphologyEx(
-            array,
-            cv2.MORPH_CLOSE,
-            np.ones((3, 3), dtype=np.uint8),
-            iterations=1,
-        )
-
-        labels_count, labels, stats, _ = cv2.connectedComponentsWithStats(array, connectivity=8)
-        height, width = array.shape
-        total_pixels = max(1, width * height)
-        budget = int(total_pixels * self.maximum_total_selective_edit_ratio)
-        selected = np.zeros_like(array, dtype=np.uint8)
-        selected_components: list[dict[str, Any]] = []
-
-        candidates: list[tuple[int, int, int, int, int, int]] = []
-        for label_index in range(1, labels_count):
-            x, y, box_width, box_height, area = [int(v) for v in stats[label_index]]
-            if area < self.minimum_component_pixels:
-                continue
-            if area / float(total_pixels) > self.maximum_component_edit_ratio:
-                continue
-            if (box_width * box_height) / float(total_pixels) > self.maximum_component_bbox_ratio:
-                continue
-            candidates.append((area, label_index, x, y, box_width, box_height))
-        candidates.sort(reverse=True)
-
-        remaining = budget
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE,
-            (self.component_padding_px * 2 + 1, self.component_padding_px * 2 + 1),
-        )
-        for area, label_index, x, y, box_width, box_height in candidates:
-            if len(selected_components) >= self.maximum_component_count or remaining <= 0:
-                break
-            component = np.where(labels == label_index, 255, 0).astype(np.uint8)
-            component = cv2.dilate(component, kernel, iterations=1)
-            component = np.where(selected > 0, 0, component).astype(np.uint8)
-            pixels = int(np.count_nonzero(component))
-            if pixels <= 0 or pixels > remaining:
-                continue
-            selected = np.maximum(selected, component)
-            remaining -= pixels
-            selected_components.append(
-                {
-                    "x": x,
-                    "y": y,
-                    "width": box_width,
-                    "height": box_height,
-                    "source_pixels": area,
-                    "selected_pixels": pixels,
-                }
-            )
-
-        selected_mask = Image.fromarray(selected, mode="L")
-        return selected_mask, {
-            "selected_local_component_count": len(selected_components),
-            "selected_local_components": selected_components,
-            "selected_local_pixels": self._pixel_count(selected_mask),
-            "local_edit_budget_pixels": budget,
-        }
+        return int(sum(binary.histogram()[128:]))
 
     @classmethod
     def _placeholder_analysis(
@@ -434,7 +369,10 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         outpaint_plan: Image.Image,
     ) -> tuple[Image.Image, dict[str, Any]]:
         plan = np.asarray(
-            outpaint_plan.convert("L").point(lambda v: 255 if v >= 128 else 0, mode="L"),
+            outpaint_plan.convert("L").point(
+                lambda value: 255 if value >= 128 else 0,
+                mode="L",
+            ),
             dtype=np.uint8,
         )
         editable = plan > 0
@@ -452,17 +390,22 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         values = rgb[editable]
         white = np.all(values >= 248, axis=1)
         black = np.all(values <= 7, axis=1)
-        magenta = (values[:, 0] >= 235) & (values[:, 1] <= 25) & (values[:, 2] >= 235)
-        cyan = (values[:, 0] <= 25) & (values[:, 1] >= 235) & (values[:, 2] >= 235)
-        suspicious = white | black | magenta | cyan
+        suspicious = white | black
         suspicious_ratio = float(np.count_nonzero(suspicious)) / float(max(1, editable_pixels))
-        channel_std = float(np.mean(np.std(values.astype(np.float32), axis=0))) if len(values) else 0.0
+        channel_std = (
+            float(np.mean(np.std(values.astype(np.float32), axis=0)))
+            if len(values)
+            else 0.0
+        )
         flat = channel_std < 2.0
         reconstructed = suspicious_ratio < 0.85 and not flat
 
         suspicious_full = np.zeros(plan.shape, dtype=np.uint8)
         suspicious_full[editable] = np.where(suspicious, 255, 0).astype(np.uint8)
-        count, _, stats, _ = cv2.connectedComponentsWithStats(suspicious_full, connectivity=8)
+        count, _, stats, _ = cv2.connectedComponentsWithStats(
+            suspicious_full,
+            connectivity=8,
+        )
         components = 0
         for index in range(1, count):
             if int(stats[index, cv2.CC_STAT_AREA]) >= 64:
@@ -475,7 +418,11 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             "solid_white_is_valid_outpaint": False,
         }
 
-    def _outpaint_reconstruction_statistics(self, candidate_path: Path, plan_path: Path) -> dict[str, Any]:
+    def _outpaint_reconstruction_statistics(
+        self,
+        candidate_path: Path,
+        plan_path: Path,
+    ) -> dict[str, Any]:
         with Image.open(candidate_path) as candidate_source, Image.open(plan_path) as plan_source:
             _, stats = self._placeholder_analysis(
                 candidate_source.convert("RGB"),
@@ -498,6 +445,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
         with Image.open(provider_output) as generated_source:
             generated = ImageOps.exif_transpose(generated_source).convert("RGB")
             provider_actual_size = generated.size
+
         crop_box = self._provider_crop_box(
             provider_actual_size,
             prepared["content_box_normalized"],
@@ -507,14 +455,21 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             Image.Resampling.LANCZOS,
         )
         environment_master_path = output_dir / "nano-banana-remapped.png"
-        generated_master.save(environment_master_path, format="PNG", optimize=False)
+        generated_master.save(
+            environment_master_path,
+            format="PNG",
+            optimize=False,
+        )
 
         with Image.open(geometry_image) as geometry_source:
             approved_rgba = ImageOps.exif_transpose(geometry_source).convert("RGBA")
         if approved_rgba.size != (width, height):
             raise AIEngineError(
-                "Результат коррекции геометрии не соответствует размеру исходного холста.",
-                details={"geometry_size": approved_rgba.size, "master_size": (width, height)},
+                "Результат коррекции геометрии не соответствует размеру рабочего холста.",
+                details={
+                    "geometry_size": approved_rgba.size,
+                    "master_size": (width, height),
+                },
             )
         approved_rgb = approved_rgba.convert("RGB")
 
@@ -526,39 +481,62 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             )
         if outpaint_plan.size != (width, height):
             raise AIEngineError(
-                "Внутренний план outpaint не соответствует размеру исходного холста.",
-                details={"plan_size": outpaint_plan.size, "master_size": (width, height)},
-            )
-
-        local_mask, local_stats = self._local_change_mask(
-            generated_master,
-            approved_rgb,
-            outpaint_plan,
-        )
-        final_edit = ImageChops.lighter(outpaint_plan, local_mask)
-        candidate = Image.composite(generated_master, approved_rgb, final_edit)
-        candidate_path = output_dir / "candidate.png"
-        candidate.save(candidate_path, format="PNG", optimize=False)
-
-        outside = ImageOps.invert(final_edit)
-        outside_difference = ImageChops.multiply(
-            ImageChops.difference(candidate, approved_rgb).convert("L"),
-            outside,
-        )
-        outside_changed_pixels = self._pixel_count(
-            outside_difference.point(lambda value: 255 if value > 0 else 0, mode="L")
-        )
-        if outside_changed_pixels:
-            raise AIEngineError(
-                "Не удалось гарантировать сохранность исходного изображения вне области изменений.",
+                "Внутренний план outpaint не соответствует размеру рабочего холста.",
                 details={
-                    "reason": "pixel_preservation_failed",
-                    "outside_changed_pixels": outside_changed_pixels,
+                    "plan_size": outpaint_plan.size,
+                    "master_size": (width, height),
                 },
             )
 
+        requested_mode = self._normalize_generation_mode(
+            prepared.get("requested_generation_mode")
+            or prepared.get("generation_mode")
+        )
+
+        if requested_mode == "outpaint":
+            final_edit = outpaint_plan
+            candidate = Image.composite(generated_master, approved_rgb, final_edit)
+            preservation_policy = "pixel-exact-outside-missing-regions"
+            outside = ImageOps.invert(final_edit)
+            outside_difference = ImageChops.multiply(
+                ImageChops.difference(candidate, approved_rgb).convert("L"),
+                outside,
+            )
+            outside_changed_pixels = self._pixel_count(
+                outside_difference.point(
+                    lambda value: 255 if value > 0 else 0,
+                    mode="L",
+                )
+            )
+            if outside_changed_pixels:
+                raise AIEngineError(
+                    "Не удалось сохранить исходные пиксели вне областей outpaint.",
+                    details={
+                        "reason": "outpaint_pixel_preservation_failed",
+                        "outside_changed_pixels": outside_changed_pixels,
+                    },
+                )
+            full_frame_semantic_edit = False
+        else:
+            # This intentionally restores the strong early image-edit behaviour:
+            # Nano Banana's coherent edited frame is accepted as the result.
+            # Architecture/camera preservation is enforced by the prompt rather
+            # than by a postprocessor that would suppress weather and cleanup.
+            candidate = generated_master
+            final_edit = Image.new("L", (width, height), 255)
+            preservation_policy = "prompt-enforced-corrected-architecture"
+            outside_changed_pixels = None
+            full_frame_semantic_edit = True
+
+        candidate_path = output_dir / "candidate.png"
+        candidate.save(candidate_path, format="PNG", optimize=False)
+
         diagnostic_plan_path = output_dir / "automatic-outpaint-plan.png"
-        outpaint_plan.save(diagnostic_plan_path, format="PNG", optimize=False)
+        outpaint_plan.save(
+            diagnostic_plan_path,
+            format="PNG",
+            optimize=False,
+        )
         final_edit_path = output_dir / "final-edit-area.png"
         final_edit.save(final_edit_path, format="PNG", optimize=False)
         _, reconstruction = self._placeholder_analysis(candidate, outpaint_plan)
@@ -577,29 +555,45 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
             "master_width": width,
             "master_height": height,
             "remapped_to_master": True,
-            "approved_geometry_preserved": True,
-            "pixel_preservation_verified": True,
+            "approved_geometry_preserved": requested_mode == "outpaint",
+            "geometry_preservation_policy": preservation_policy,
+            "pixel_preservation_verified": requested_mode == "outpaint",
             "outside_changed_pixels": outside_changed_pixels,
             "automatic_outpaint_plan": str(diagnostic_plan_path),
             "final_edit_area": str(final_edit_path),
-            **local_stats,
+            "requested_generation_mode": requested_mode,
+            "generation_mode": requested_mode,
+            "full_frame_semantic_edit": full_frame_semantic_edit,
+            "strong_image_edit_enabled": requested_mode in {"hybrid", "edit"},
             **reconstruction,
         }
 
-    # Compatibility-only helper for old diagnostic tests. Runtime does not split
-    # the request into additional billable tile calls anymore.
-    def _component_tile_boxes(self, mask: Image.Image) -> list[dict[str, Any]]:
+    # Compatibility-only diagnostic helpers. Runtime does not make tile calls.
+    def _component_tile_boxes(self, image: Image.Image) -> list[dict[str, Any]]:
         binary = np.asarray(
-            mask.convert("L").point(lambda v: 255 if v >= 128 else 0, mode="L"),
+            image.convert("L").point(
+                lambda value: 255 if value >= 128 else 0,
+                mode="L",
+            ),
             dtype=np.uint8,
         )
-        count, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        count, _, stats, _ = cv2.connectedComponentsWithStats(
+            binary,
+            connectivity=8,
+        )
         output: list[dict[str, Any]] = []
         for index in range(1, count):
-            x, y, width, height, area = [int(v) for v in stats[index]]
+            x, y, component_width, component_height, area = [
+                int(value) for value in stats[index]
+            ]
             output.append(
                 {
-                    "crop_box": (x, y, x + width, y + height),
+                    "crop_box": (
+                        x,
+                        y,
+                        x + component_width,
+                        y + component_height,
+                    ),
                     "mask_pixels": area,
                     "grid_row": 0,
                     "grid_column": 0,
@@ -609,14 +603,15 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
 
     def _tile_prompt(self, original_prompt: str, tile_index: int) -> str:
         return (
-            f"Служебная диагностика outpaint {tile_index}. "
-            "Дорисуй отсутствующее окружение и точно выполни исходный промпт:\n"
+            f"Диагностический outpaint-фрагмент {tile_index}. "
+            "Восстанови отсутствующее окружение, сохраняя архитектуру.\n"
             f"{original_prompt}"
         )
 
     def generate_environment(self, **kwargs) -> dict:
         prompt = self._clean_prompt(kwargs.get("prompt", ""))
         kwargs["prompt"] = prompt
+        requested_mode = self._mode_from_prompt(prompt)
         try:
             result = super().generate_environment(**kwargs)
         except AIEngineError as exc:
@@ -643,7 +638,9 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 details={
                     "reason": "prompt_transport_mismatch",
                     "ui_prompt_sha256": self._prompt_sha256(prompt),
-                    "sent_prompt_sha256": self._prompt_sha256(sent_prompt) if sent_prompt else "",
+                    "sent_prompt_sha256": (
+                        self._prompt_sha256(sent_prompt) if sent_prompt else ""
+                    ),
                     "provider_call_made": True,
                 },
             )
@@ -652,6 +649,7 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 "Собранный в интерфейсе промпт не был отправлен в Nano Banana дословно.",
                 details={"reason": "ui_prompt_not_sent_verbatim"},
             )
+
         result.update(
             {
                 "prompt_match": sent_prompt == prompt,
@@ -660,7 +658,9 @@ class OpenRouterImageEngine(_BaseOpenRouterImageEngine):
                 "prompt_transport_policy": self.prompt_transport_policy,
                 "provider_input_policy": self.provider_input_policy,
                 "provider_reference_count": 1,
-                "generation_mode": self.generation_mode,
+                "generation_mode": requested_mode,
+                "requested_generation_mode": requested_mode,
+                "strong_image_edit_enabled": requested_mode in {"hybrid", "edit"},
             }
         )
         output_dir = Path(kwargs["output_dir"])
