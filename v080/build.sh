@@ -24,6 +24,8 @@ grep -q 'OUTPAINT' "$ROOT/app/web/app-v080.js"
 grep -q '__MARINS_GENERATION_MODE__' "$ROOT/app/web/app-v080.js"
 grep -q 'skill_engine' "$ROOT/app/__init__.py"
 grep -q 'transport_engine_version = "3.3.0"' "$ROOT/app/skill_engine.py"
+grep -q 'edge-tiles-on-placeholder' "$ROOT/app/skill_engine.py"
+grep -q '_run_edge_tile_fallback' "$ROOT/app/skill_engine.py"
 grep -q 'environment-system-v1.6-skill-contracts' "$ROOT/app/system_prompts.py"
 grep -q 'generation-sized-working-master' "$ROOT/app/image_engine.py"
 
@@ -58,6 +60,9 @@ assert engine.user_mask_required is False
 assert engine.internal_outpaint_tiles_allowed is False
 assert engine.outpaint_repair_mode == "hybrid-second-pass"
 assert engine.skill_contract_version == "outpaint-relight-edit-hybrid-v1"
+assert engine.outpaint_fallback_mode == "edge-tiles-on-placeholder"
+assert engine.outpaint_fallback_attempts_per_edge == 2
+assert engine.outpaint_initial_qc_blocking is False
 assert PROMPT_CONTRACT_VERSION == "environment-system-v1.6-skill-contracts"
 assert PromptEngine._normalize_mode("relight") == "relight"
 assert PromptEngine._normalize_mode("edit") == "edit"
@@ -68,10 +73,11 @@ assert image_engine._fit_size((8064, 6048), (1536, 1024)) == (1365, 1024)
 print(f"OpenCV {cv2.__version__} and NumPy {numpy.__version__} verified")
 print("Skill Engine 3.3.0 verified")
 print("Skills: HYBRID / RELIGHT / IMAGE EDIT / OUTPAINT")
-print("OUTPAINT: pixel-exact outside missing regions")
+print("OUTPAINT: full-frame attempt -> automatic edge-tile fallback on blank placeholder")
+print("OUTPAINT fallback: TOP / BOTTOM / LEFT / RIGHT, up to 2 attempts per edge")
 print("RELIGHT: full-frame photometric change; corrected geometry preserved")
 print("IMAGE EDIT: requested semantic edits retained; no source-pixel restoration over edits")
-print("HYBRID: edit/relight first, outpaint second")
+print("HYBRID: edit/relight first, outpaint second, edge fallback when required")
 print("Working master: generation-sized before Perspective Grid")
 PY
 
