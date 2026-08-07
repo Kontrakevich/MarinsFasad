@@ -71,7 +71,25 @@ def test_operator_prompt_is_primary_and_repeated_as_final_command(tmp_path: Path
 
     assert prompt.startswith(OPERATOR_PROMPT_MARKER)
     assert first_instruction < final_marker < last_instruction
-    assert "First priority: execute every semantic edit requested by the operator" in prompt
-    assert "global weather/atmosphere changes" in prompt
+    assert "Pass 1: execute every semantic edit" in prompt
+    assert "SCENE-WIDE LIGHTING" in prompt
     assert "automatic outpaint" in prompt.lower()
     assert "mask" not in prompt.lower()
+
+
+def test_relight_prompt_is_not_converted_to_outpaint_preservation(tmp_path: Path):
+    compiled = PromptEngine().compile(
+        PromptContext(
+            stage="environment",
+            master_prompt="ignored",
+            comments=[
+                "__MARINS_GENERATION_MODE__:relight",
+                "Сделать золотой час и длинные мягкие тени.",
+            ],
+        ),
+        tmp_path,
+    )
+    prompt = compiled["prompt"]
+    assert "GENERATION MODE\nRELIGHT" in prompt
+    assert "Do NOT restore original source pixels after relighting" in prompt
+    assert "Apply pixel-exact preservation only when the active skill is OUTPAINT" in prompt
