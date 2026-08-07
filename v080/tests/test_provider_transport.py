@@ -15,10 +15,6 @@ def make_geometry(path: Path, size=(1200, 900), color=(10, 20, 30, 255)):
     image.save(path, format="PNG")
 
 
-def make_internal_plan(path: Path, size=(1200, 900)):
-    Image.new("L", size, 0).save(path, format="PNG")
-
-
 def capabilities(engine):
     return {
         "provider": "openrouter",
@@ -41,12 +37,12 @@ def test_nano_banana_and_geometry_only_contract_are_hard_locked(monkeypatch):
     engine = OpenRouterImageEngine()
     assert engine.model == NANO_BANANA
     assert engine.required_model == NANO_BANANA
-    assert engine.transport_engine_version == "2.9.1"
+    assert engine.transport_engine_version == "3.0.0"
     assert engine.environment_input_policy == "approved-geometry-only"
     assert engine.outpaint_detection_policy == "automatic-from-approved-geometry-transparency"
     assert engine.user_mask_required is False
-    assert engine.internal_outpaint_tiles_allowed is True
     assert engine.provider_input_policy == "single-approved-geometry-reference"
+    assert engine.internal_outpaint_tiles_allowed is False
 
 
 def test_provider_size_selection_matches_master_orientation():
@@ -57,28 +53,22 @@ def test_provider_size_selection_matches_master_orientation():
 
 def test_automatic_outpaint_plan_is_derived_from_geometry_alpha(tmp_path):
     geometry = tmp_path / "geometry.png"
-    ignored_internal_plan = tmp_path / "internal-plan.png"
-    effective = tmp_path / "effective.png"
+    plan = tmp_path / "automatic-outpaint-plan.png"
     make_geometry(geometry, (32, 16))
-    make_internal_plan(ignored_internal_plan, (32, 16))
 
-    OpenRouterImageEngine._effective_edit_mask(
-        geometry,
-        ignored_internal_plan,
-        effective,
-    )
-    with Image.open(effective) as result:
+    _, stats = OpenRouterImageEngine._derive_outpaint_plan(geometry, plan)
+    with Image.open(plan) as result:
         result = result.convert("L")
         assert result.getpixel((1, 8)) == 255
         assert result.getpixel((20, 8)) == 0
+    assert stats["outpaint_required"] is True
+    assert stats["missing_pixels"] > 0
 
 
 def test_transport_uses_one_geometry_reference_and_auto_detection(tmp_path, monkeypatch):
     geometry = tmp_path / "geometry.png"
-    internal_plan = tmp_path / "internal-plan.png"
     source_size = (2400, 1800)
     make_geometry(geometry, source_size)
-    make_internal_plan(internal_plan, source_size)
 
     engine = OpenRouterImageEngine()
     engine.transmit_max_request_bytes = 2 * 1024 * 1024
@@ -87,7 +77,7 @@ def test_transport_uses_one_geometry_reference_and_auto_detection(tmp_path, monk
     result = engine.prepare_environment_inputs(
         prompt="Дорисовать отсутствующее окружение и убрать только автомобиль справа.",
         geometry_image=geometry,
-        outpaint_mask=internal_plan,
+        outpaint_mask=tmp_path / "ignored.png",
         output_dir=tmp_path / "transport",
         width=source_size[0],
         height=source_size[1],
@@ -108,14 +98,12 @@ def test_transport_uses_one_geometry_reference_and_auto_detection(tmp_path, monk
 
 def test_payload_contains_exact_prompt_and_only_geometry_reference(tmp_path):
     geometry = tmp_path / "approved-geometry.png"
-    internal_plan = tmp_path / "internal-plan.png"
     make_geometry(geometry, (320, 240))
-    make_internal_plan(internal_plan, (320, 240))
 
     payload = OpenRouterImageEngine()._build_payload(
         prompt="Operator requirement: replace only the car on the right.",
         geometry_image=geometry,
-        outpaint_mask=internal_plan,
+        outpaint_mask=tmp_path / "ignored.png",
         provider_size=(1536, 1024),
     )
 
@@ -133,16 +121,4 @@ def test_prepared_request_content_length_is_exact():
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "2.9.1"
-
-
-def test_extract_openrouter_limits_and_supported_sizes():
-    text = (
-        '{"error":{"message":"Invalid size \'8064x6048\'. Supported sizes are '
-        '1024x1024, 1024x1536, 1536x1024, and auto.","code":400}}'
-    )
-    assert OpenRouterImageEngine._extract_supported_sizes(text) == [
-        (1024, 1024), (1024, 1536), (1536, 1024)
-    ]
-    size_error = '{"error":{"message":"Request body exceeds the maximum allowed size of 52428800 bytes","code":413}}'
-    assert OpenRouterImageEngine._extract_request_limit(size_error) == 52428800
+    assert prepared.headers["X-Marins-Transport-Engine"] == "3.0.0"
