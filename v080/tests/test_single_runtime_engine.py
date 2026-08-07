@@ -6,9 +6,9 @@ from app.ai_engine import OpenRouterImageEngine
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_only_hybrid_engine_is_imported_by_app_package():
+def test_only_skill_engine_is_imported_by_app_package():
     init = (ROOT / "app" / "__init__.py").read_text("utf-8")
-    assert "hybrid_engine" in init
+    assert "skill_engine" in init
     assert "stable_engine" not in init
     for obsolete in (
         "provider_policy",
@@ -24,12 +24,13 @@ def test_only_hybrid_engine_is_imported_by_app_package():
         assert not (ROOT / "app" / f"{obsolete}.py").exists()
 
 
-def test_active_engine_contract_is_hybrid_v3200():
+def test_active_engine_contract_is_skill_v3300():
     engine = OpenRouterImageEngine()
-    assert engine.transport_engine_version == "3.2.0"
+    assert engine.transport_engine_version == "3.3.0"
     assert engine.model == "google/gemini-2.5-flash-image"
     assert engine.default_generation_mode == "hybrid"
-    assert engine.available_generation_modes == ("hybrid", "edit", "outpaint")
+    assert engine.available_generation_modes == ("hybrid", "relight", "edit", "outpaint")
+    assert engine.skill_contract_version == "outpaint-relight-edit-hybrid-v1"
     assert engine.environment_input_policy == "approved-geometry-only"
     assert engine.outpaint_detection_policy == "automatic-from-approved-geometry-transparency"
     assert engine.provider_input_policy == "single-approved-geometry-reference"
