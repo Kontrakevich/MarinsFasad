@@ -3,7 +3,7 @@ from pathlib import Path
 from PIL import Image
 
 from app.ai_engine import OpenRouterImageEngine
-from app.prompt_engine import GENERATION_MODE_MARKER
+from app.prompt_engine import GENERATION_MODE_MARKER, GENERATION_QUALITY_MARKER
 from app.system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
 
 
@@ -38,10 +38,13 @@ def test_nano_banana_and_skill_contract_are_hard_locked(monkeypatch):
     engine = OpenRouterImageEngine()
     assert engine.model == NANO_BANANA
     assert engine.required_model == NANO_BANANA
-    assert engine.transport_engine_version == "3.3.0"
+    assert engine.transport_engine_version == "3.4.0"
     assert engine.default_generation_mode == "hybrid"
     assert engine.available_generation_modes == ("hybrid", "relight", "edit", "outpaint")
-    assert engine.skill_contract_version == "outpaint-relight-edit-hybrid-v1"
+    assert engine.available_generation_qualities == ("draft", "standard", "high", "max")
+    assert engine.default_generation_quality == "high"
+    assert engine.skill_contract_version == "outpaint-relight-edit-hybrid-quality-v2"
+    assert engine.outpaint_fallback_mode == "quality-aware-edge-refine"
     assert engine.environment_input_policy == "approved-geometry-only"
     assert engine.outpaint_detection_policy == "automatic-from-approved-geometry-transparency"
     assert engine.user_mask_required is False
@@ -98,6 +101,7 @@ def test_transport_uses_one_geometry_reference_and_hybrid_default(tmp_path, monk
 
     prompt = (
         f"{GENERATION_MODE_MARKER}\nHYBRID\n\n"
+        f"{GENERATION_QUALITY_MARKER}\nHIGH\n\n"
         "Убрать столбы и провода. Сделать облачную погоду."
     )
     result = engine.prepare_environment_inputs(
@@ -128,10 +132,12 @@ def test_relight_mode_is_recognised_as_full_frame_semantic_skill():
     engine = OpenRouterImageEngine()
     prompt = (
         f"{GENERATION_MODE_MARKER}\nRELIGHT\n\n"
+        f"{GENERATION_QUALITY_MARKER}\nMAX\n\n"
         "Сделать вечернее освещение, тёплый свет из окон и мокрый асфальт."
     )
     assert engine._mode_from_prompt(prompt) == "relight"
     assert engine._normalize_generation_mode("relight") == "relight"
+    assert engine._quality_from_prompt(prompt) == "max"
     assert "relight" in engine.available_generation_modes
 
 
@@ -154,20 +160,25 @@ def test_payload_contains_prompt_and_only_geometry_reference(tmp_path):
     assert payload["input_references"][0]["image_url"]["url"].startswith("data:image/")
 
 
-def test_internal_outpaint_prompt_preserves_completed_edit_context():
+def test_internal_outpaint_prompt_receives_complete_original_prompt():
     engine = OpenRouterImageEngine()
     prompt = (
         "OPERATOR PROMPT — EXECUTE EXACTLY\n"
         "1. Убрать столбы и провода.\n"
-        "2. Сделать облачную погоду.\n\n"
-        "GENERATION MODE\nHYBRID"
+        "2. Сделать облачную погоду.\n"
+        "3. Мокрый асфальт и тёплый свет в окнах.\n\n"
+        "GENERATION MODE\nHYBRID\n\n"
+        "GENERATION QUALITY\nHIGH\n\n"
+        "FINAL COMMAND — EXECUTE THE OPERATOR PROMPT\n"
+        "Выполнить все три требования."
     )
     internal = engine._internal_outpaint_prompt(prompt)
-    assert "INTERNAL HYBRID PASS 2/2" in internal
+    assert internal.startswith("INTERNAL HYBRID PASS 2/2 — OUTPAINT ONLY")
     assert "GENERATION MODE\nOUTPAINT" in internal
-    assert "Убрать столбы и провода." in internal
-    assert "Сделать облачную погоду." in internal
-    assert "ALREADY EXECUTED IN PASS 1" in internal
+    assert "GENERATION QUALITY\nHIGH" in internal
+    assert "FULL ORIGINAL COMPILED PROMPT — MANDATORY CONTEXT" in internal
+    assert prompt in internal
+    assert "Мокрый асфальт и тёплый свет в окнах." in internal
 
 
 def test_prepared_request_content_length_is_exact():
@@ -176,4 +187,4 @@ def test_prepared_request_content_length_is_exact():
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "3.3.0"
+    assert prepared.headers["X-Marins-Transport-Engine"] == "3.4.0"
