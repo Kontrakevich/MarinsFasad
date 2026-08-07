@@ -1,5 +1,5 @@
 __version__ = "0.8.1"
 
-# Exactly one runtime layer is active. The hybrid engine subclasses the raw
-# OpenRouter transport once and owns Edit / Outpaint / Hybrid execution.
-from . import hybrid_engine as _hybrid_engine  # noqa: F401,E402
+# One canonical runtime entrypoint. skill_engine extends the stable two-pass
+# hybrid transport with explicit OUTPAINT / RELIGHT / IMAGE EDIT skill contracts.
+from . import skill_engine as _skill_engine  # noqa: F401,E402
