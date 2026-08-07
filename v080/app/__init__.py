@@ -1,5 +1,5 @@
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 
-# Runtime policy is intentionally composed in one place only.
-# Obsolete policy layers were removed so nothing can override the active engine.
-from . import stable_engine as _stable_engine  # noqa: F401,E402
+# Exactly one runtime layer is active. The hybrid engine subclasses the raw
+# OpenRouter transport once and owns Edit / Outpaint / Hybrid execution.
+from . import hybrid_engine as _hybrid_engine  # noqa: F401,E402
