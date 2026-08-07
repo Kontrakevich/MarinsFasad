@@ -80,7 +80,7 @@
     document.head.appendChild(style);
 
     const version = document.querySelector('.version-mark');
-    if (version) version.textContent = 'V0.8.1 HYBRID';
+    if (version) version.textContent = 'V0.8.0 HYBRID';
   }
 
   async function responseJson(response) {
