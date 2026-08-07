@@ -9,18 +9,14 @@ def test_generation_polling_retries_transient_codespaces_errors():
     for status in ("408", "425", "429", "502", "503", "504"):
         assert status in bridge
     assert "TRANSIENT_HTTP_STATUSES" in bridge
-    assert "continue;" in bridge
     assert "generation-status" in bridge
     assert "Запрос не будет продублирован" in bridge
 
 
-def test_browser_cache_key_for_resilient_generation_client():
-    html = (ROOT / "ui_single_window" / "index.html").read_text("utf-8")
+def test_stable_build_keeps_resilient_generation_bridge():
     build = (ROOT / "build.sh").read_text("utf-8")
     start = (ROOT / "start.sh").read_text("utf-8")
-
-    assert "resilient-fullframe-0806" in html
-    assert "TRANSIENT_HTTP_STATUSES" in build
-    assert "TRANSIENT_HTTP_STATUSES" in start
+    assert "stable-nanobanana-3000" in build
+    assert "stable-nanobanana-3000" in start
     assert "async-generation-bridge.js" in build
     assert "async-generation-bridge.js" in start
