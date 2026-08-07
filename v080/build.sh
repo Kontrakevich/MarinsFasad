@@ -18,7 +18,8 @@ grep -q 'background-job-polling' "$ROOT/app/main.py"
 grep -q 'approved-geometry-only' "$ROOT/app/main.py"
 grep -q 'automatic-from-approved-geometry' "$ROOT/app/main.py"
 grep -q 'single-approved-geometry-reference' "$ROOT/app/prompt_enforcement_policy.py"
-grep -q 'approved-geometry-only' "$ROOT/app/geometry_only_outpaint_policy.py"
+grep -q 'transport_engine_version = "2.9.1"' "$ROOT/app/geometry_only_outpaint_policy.py"
+grep -q 'internal-derived-outpaint-tile' "$ROOT/app/geometry_only_outpaint_policy.py"
 grep -q 'OutpaintPlanEngine' "$ROOT/app/outpaint_plan.py"
 ! grep -q 'geometry_outpaint_mask' "$ROOT/app/main.py"
 
@@ -65,12 +66,13 @@ from app.system_prompts import PROMPT_CONTRACT_VERSION
 
 os.environ["OPENROUTER_IMAGE_MODEL"] = "must-be-ignored/test-model"
 engine = OpenRouterImageEngine()
-assert OpenRouterImageEngine.transport_engine_version == "2.9.0"
+assert OpenRouterImageEngine.transport_engine_version == "2.9.1"
 assert engine.model == "google/gemini-2.5-flash-image"
 assert engine.required_model == "google/gemini-2.5-flash-image"
 assert engine.environment_input_policy == "approved-geometry-only"
 assert engine.outpaint_detection_policy == "automatic-from-approved-geometry-transparency"
 assert engine.user_mask_required is False
+assert engine.internal_outpaint_tiles_allowed is True
 assert engine.provider_input_policy == "single-approved-geometry-reference"
 assert PROMPT_CONTRACT_VERSION == "environment-system-v1.4"
 assert health()["generation_mode"] == "background-job-polling"
@@ -82,6 +84,7 @@ print(
     f"prompt contract {PROMPT_CONTRACT_VERSION}; "
     "approved geometry is the only project input; "
     "missing surroundings are detected automatically; "
+    "internal derived outpaint tiles are permitted; "
     "Nano Banana receives one geometry reference"
 )
 PY
