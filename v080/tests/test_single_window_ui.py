@@ -44,7 +44,7 @@ def test_perspective_grid_is_connected_to_v080_api():
     assert "geo.future" in js
 
 
-def test_background_generation_bridge_is_built_before_workspace_app():
+def test_background_generation_bridge_and_ui_patches_are_built_in_order():
     bridge = (ROOT / "ui_single_window" / "async-generation-bridge.js").read_text("utf-8")
     build = (ROOT / "build.sh").read_text("utf-8")
     start = (ROOT / "start.sh").read_text("utf-8")
@@ -52,8 +52,14 @@ def test_background_generation_bridge_is_built_before_workspace_app():
     assert "generation-status" in bridge
     assert "status_url" in bridge
     assert "POLL_INTERVAL_MS" in bridge
-    assert 'cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js"' in build
-    assert 'cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js"' in start
+    for script in (
+        "async-generation-bridge.js",
+        "app-v080.js",
+        "grid-ux-patch.js",
+        "hybrid-mode-patch.js",
+    ):
+        assert script in build
+        assert script in start
 
 
 def test_build_uses_single_window_sources():
