@@ -12,7 +12,7 @@ OPERATOR_PROMPT_MARKER = "OPERATOR PROMPT — EXECUTE EXACTLY"
 FINAL_COMMAND_MARKER = "FINAL COMMAND — EXECUTE THE OPERATOR PROMPT"
 GENERATION_MODE_MARKER = "GENERATION MODE"
 MODE_COMMENT_PREFIX = "__MARINS_GENERATION_MODE__:"
-VALID_GENERATION_MODES = {"hybrid", "edit", "outpaint"}
+VALID_GENERATION_MODES = {"hybrid", "relight", "edit", "outpaint"}
 
 
 @dataclass
@@ -69,27 +69,38 @@ class PromptEngine:
 
     @staticmethod
     def _mode_contract(mode: str) -> str:
+        if mode == "relight":
+            return (
+                "RELIGHT / NEW LIGHTING SKILL.\n"
+                "The operator request defines a scene-wide lighting and atmosphere transformation.\n"
+                "You may change illumination across every visible pixel: sky, cloud cover, sun direction, ambient light, exposure, white balance, shadows, reflections, wetness response, time of day and photographic atmosphere.\n"
+                "Do NOT restore original source pixels after relighting; a coherent global lighting transformation is required.\n"
+                "Preserve camera, framing, perspective, building geometry, facade proportions, openings and architectural identity.\n"
+                "Do not remove or replace unrelated physical objects unless the operator also explicitly requests that edit."
+            )
         if mode == "edit":
             return (
-                "IMAGE EDIT MODE.\n"
-                "The operator request is the dominant task. Perform the requested semantic image edit strongly and visibly.\n"
-                "Object removals, replacements and global weather/atmosphere changes are allowed when requested.\n"
-                "Preserve corrected camera position and architectural geometry.\n"
-                "Do not let missing-edge reconstruction distract from the requested edit."
+                "IMAGE EDIT SKILL.\n"
+                "The operator request is the dominant task. Perform the requested semantic edit strongly and visibly.\n"
+                "Object removals, replacements, cleanup and property changes are allowed exactly where requested.\n"
+                "If the request explicitly changes weather, atmosphere or lighting, that requested change may affect the full frame.\n"
+                "Do NOT restore original pixels over requested edits; reconstruct the physically plausible scene after the edit.\n"
+                "Preserve corrected camera position and architectural geometry unless an exact architectural element is explicitly targeted."
             )
         if mode == "outpaint":
             return (
-                "OUTPAINT MODE.\n"
+                "OUTPAINT SKILL.\n"
                 "Reconstruct only visual information missing after perspective correction.\n"
                 "Existing visible pixels are immutable and must be preserved exactly.\n"
-                "Do not perform unrelated semantic edits, weather changes or scene redesign."
+                "Seam blending is allowed only in a narrow transition band at the missing-region boundary.\n"
+                "Do not perform semantic edits, weather changes, global relighting or scene redesign."
             )
         return (
-            "HYBRID MODE — IMAGE EDIT + OUTPAINT.\n"
-            "First priority: execute every semantic edit requested by the operator, including object cleanup and global weather/atmosphere changes.\n"
-            "Also reconstruct all visual information missing after perspective correction.\n"
-            "Return one coherent photorealistic edited photograph.\n"
-            "Preserve the corrected camera and architectural geometry while allowing the requested environment to change."
+            "HYBRID SKILL — SEMANTIC EDIT / RELIGHT FIRST, OUTPAINT SECOND.\n"
+            "Pass 1: execute every semantic edit and scene-wide lighting/weather transformation explicitly requested by the operator.\n"
+            "Do not restore original pixels over the completed Pass-1 edit. Preserve corrected architectural geometry.\n"
+            "Pass 2: reconstruct only the visual information missing after perspective correction, matching the edited scene's new lighting and atmosphere.\n"
+            "The final image must be one coherent photorealistic photograph."
         )
 
     def compile(self, context: PromptContext, project_dir: Path) -> dict:
@@ -125,29 +136,37 @@ class PromptEngine:
             sections = [
                 (OPERATOR_PROMPT_MARKER, operator_prompt),
                 (GENERATION_MODE_MARKER, generation_mode.upper()),
-                ("MODE EXECUTION CONTRACT", mode_contract),
+                ("ACTIVE SKILL CONTRACT", mode_contract),
                 (
                     "APPROVED CORRECTED GEOMETRY",
                     (
                         f"{approved_base}\n"
-                        "This corrected photograph is the authoritative geometry and camera reference.\n"
+                        "This corrected photograph is the authoritative camera and geometry reference.\n"
                         "Do not crop, reframe, stretch or geometrically redesign the building."
                     ),
                 ),
                 (
-                    "SEMANTIC EDIT PRIORITY",
+                    "SEMANTIC IMAGE EDITING",
                     (
-                        "Execute all explicit operator instructions visibly.\n"
-                        "Removing poles, overhead wires, cables, cars, signs or temporary clutter is a normal image-edit task when requested.\n"
-                        "Changing weather, clouds, sky, daylight, season, wetness or scene atmosphere may affect the whole environment when explicitly requested.\n"
-                        "Reconstruct physically plausible background behind removed objects."
+                        "When the active skill permits semantic editing, execute all explicit operator instructions visibly.\n"
+                        "Removing poles, overhead wires, cables, cars, signs or temporary clutter is a normal image-edit operation when requested.\n"
+                        "Reconstruct the physically plausible background behind removed objects.\n"
+                        "Do not use pixel restoration that would undo the requested edit."
+                    ),
+                ),
+                (
+                    "SCENE-WIDE LIGHTING",
+                    (
+                        "When RELIGHT is active, or when HYBRID/IMAGE EDIT explicitly requests new weather or lighting, the entire visible photograph may change photometrically.\n"
+                        "Global illumination, sky, shadows, reflections, exposure and atmosphere must remain physically coherent across the whole frame.\n"
+                        "Geometry preservation does not mean pixel preservation in these skills."
                     ),
                 ),
                 (
                     "AUTOMATIC OUTPAINT",
                     (
-                        "When the selected mode includes outpaint, detect and reconstruct every area where the corrected geometry contains no visual information.\n"
-                        "Continue the neighbouring scene naturally with correct perspective and lighting.\n"
+                        "When the active skill includes outpaint, detect and reconstruct every area where the corrected geometry contains no visual information.\n"
+                        "Continue the neighbouring scene naturally with correct perspective and with lighting matching the current edited scene.\n"
                         "Do not return blank or flat-colour wedges."
                     ),
                 ),
@@ -164,8 +183,8 @@ class PromptEngine:
                     (
                         f"{operator_prompt}\n\n"
                         f"Generation mode: {generation_mode.upper()}. "
-                        "Perform the requested image edit now. Keep the corrected architecture geometrically stable. "
-                        "When this mode includes outpaint, also complete every missing part of the surroundings."
+                        "Execute the active skill exactly. Preserve the corrected camera and architectural geometry. "
+                        "Apply pixel-exact preservation only when the active skill is OUTPAINT; do not use it to undo RELIGHT or IMAGE EDIT results."
                     ),
                 ),
             ]
@@ -222,10 +241,12 @@ class PromptEngine:
             "pixel_preservation": (
                 "existing-visible-pixels-exact"
                 if is_environment and generation_mode == "outpaint"
-                else "architecture-geometry-preserved-by-prompt"
-                if is_environment
+                else "geometry-preserved-photometry-may-change"
+                if is_environment and generation_mode == "relight"
+                else "geometry-preserved-requested-edits-retained"
+                if is_environment and generation_mode in {"edit", "hybrid"}
                 else "stage-default"
             ),
             "prompt_transport_policy": "ui-compiled-prompt-sent-verbatim" if is_environment else "stage-default",
-            "missing_region_policy": "automatic-outpaint-when-mode-includes-it" if is_environment else "stage-default",
+            "missing_region_policy": "automatic-outpaint-when-skill-includes-it" if is_environment else "stage-default",
         }
