@@ -19,10 +19,11 @@ def test_health():
     assert payload['outpaint_detection'] == 'automatic-from-approved-geometry'
 
     engine = OpenRouterImageEngine()
-    assert OpenRouterImageEngine.transport_engine_version == '3.2.0'
+    assert OpenRouterImageEngine.transport_engine_version == '3.3.0'
     assert engine.required_model == 'google/gemini-2.5-flash-image'
     assert engine.default_generation_mode == 'hybrid'
-    assert engine.available_generation_modes == ('hybrid', 'edit', 'outpaint')
+    assert engine.available_generation_modes == ('hybrid', 'relight', 'edit', 'outpaint')
+    assert engine.skill_contract_version == 'outpaint-relight-edit-hybrid-v1'
     assert engine.environment_input_policy == 'approved-geometry-only'
     assert engine.outpaint_detection_policy == 'automatic-from-approved-geometry-transparency'
     assert engine.user_mask_required is False
@@ -33,7 +34,7 @@ def test_health():
     assert engine.missing_region_transport_policy == 'native-transparency-single-reference'
     assert engine.outpaint_repair_mode == 'hybrid-second-pass'
     assert ENVIRONMENT_SYSTEM_PROMPT
-    assert PROMPT_CONTRACT_VERSION == 'environment-system-v1.5-hybrid'
+    assert PROMPT_CONTRACT_VERSION == 'environment-system-v1.6-skill-contracts'
 
 
 def test_project_create_and_list():
