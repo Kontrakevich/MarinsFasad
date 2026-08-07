@@ -85,4 +85,4 @@ MARINS_DATA_ROOT="$ROOT/.test-data/projects" \
 python -m pytest -vv --timeout=60 --timeout-method=thread
 rm -rf .test-data
 
-echo "Marins Facade v0.8.1 Hybrid build passed"
+echo "Marins Facade v0.8.0 Hybrid build passed"
