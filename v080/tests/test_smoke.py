@@ -28,7 +28,8 @@ def test_health():
     assert engine.user_mask_required is False
     assert engine.internal_outpaint_tiles_allowed is False
     assert engine.provider_input_policy == 'single-approved-geometry-reference'
-    assert engine.outpaint_qc_blocking is False
+    assert engine.outpaint_qc_blocking is True
+    assert engine.outpaint_qc_policy == 'reject-solid-white-black-placeholder'
     assert engine.missing_region_transport_policy == 'native-transparency-single-reference'
     assert engine.outpaint_repair_mode == 'hybrid-second-pass'
     assert ENVIRONMENT_SYSTEM_PROMPT
