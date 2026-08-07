@@ -16,8 +16,8 @@ def test_generation_polling_retries_transient_codespaces_errors():
 def test_hybrid_build_keeps_resilient_generation_bridge():
     build = (ROOT / "build.sh").read_text("utf-8")
     start = (ROOT / "start.sh").read_text("utf-8")
-    assert "hybrid-edit-3100" in build
-    assert "hybrid-edit-3100" in start
+    assert "hybrid-two-pass-3200" in build
+    assert "hybrid-two-pass-3200" in start
     assert "async-generation-bridge.js" in build
     assert "async-generation-bridge.js" in start
     assert "hybrid-mode-patch.js" in build
