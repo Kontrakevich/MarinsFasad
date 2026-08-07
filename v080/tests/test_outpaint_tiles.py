@@ -11,11 +11,11 @@ def test_legacy_tiled_repair_is_disabled():
     assert engine.outpaint_tile_planner == "disabled"
 
 
-def test_missing_region_marker_is_opaque_and_not_white():
+def test_compatibility_marker_is_neutral_and_not_used_for_transport():
     marker = OpenRouterImageEngine._missing_region_marker((64, 48)).convert("RGBA")
     colors = set(marker.getdata())
-    assert colors == {(255, 0, 255, 255), (0, 255, 255, 255)}
-    assert (255, 255, 255, 255) not in colors
+    assert colors == {(127, 127, 127, 255)}
+    assert OpenRouterImageEngine.missing_region_transport_policy == "native-transparency-single-reference"
 
 
 def test_placeholder_analysis_rejects_solid_white_and_accepts_scene_texture():
@@ -41,6 +41,6 @@ def test_placeholder_analysis_rejects_solid_white_and_accepts_scene_texture():
 
 def test_compatibility_tile_prompt_keeps_original_prompt():
     engine = OpenRouterImageEngine()
-    original = "Убрать только белый автомобиль справа и продолжить покрытие парковки."
+    original = "Убрать столбы и провода и продолжить покрытие парковки."
     prompt = engine._tile_prompt(original, 1)
     assert original in prompt
