@@ -38,7 +38,7 @@ def test_nano_banana_and_hybrid_contract_are_hard_locked(monkeypatch):
     engine = OpenRouterImageEngine()
     assert engine.model == NANO_BANANA
     assert engine.required_model == NANO_BANANA
-    assert engine.transport_engine_version == "3.1.0"
+    assert engine.transport_engine_version == "3.2.0"
     assert engine.default_generation_mode == "hybrid"
     assert engine.available_generation_modes == ("hybrid", "edit", "outpaint")
     assert engine.environment_input_policy == "approved-geometry-only"
@@ -47,6 +47,7 @@ def test_nano_banana_and_hybrid_contract_are_hard_locked(monkeypatch):
     assert engine.provider_input_policy == "single-approved-geometry-reference"
     assert engine.internal_outpaint_tiles_allowed is False
     assert engine.missing_region_transport_policy == "native-transparency-single-reference"
+    assert engine.outpaint_repair_mode == "hybrid-second-pass"
 
 
 def test_provider_size_selection_matches_master_orientation():
@@ -117,7 +118,7 @@ def test_transport_uses_one_geometry_reference_and_hybrid_default(tmp_path, monk
     assert result["input_reference_count"] == 1
     assert result["generation_mode"] == "hybrid"
     assert result["requested_generation_mode"] == "hybrid"
-    assert result["visual_reference_policy"] == "native-alpha-no-service-colour-pattern"
+    assert result["visual_reference_policy"] == "native-alpha-no-service-pattern"
     assert result["system_prompt_contract"] == PROMPT_CONTRACT_VERSION
     assert Path(result["effective_mask_path"]).is_file()
 
@@ -141,10 +142,26 @@ def test_payload_contains_prompt_and_only_geometry_reference(tmp_path):
     assert payload["input_references"][0]["image_url"]["url"].startswith("data:image/")
 
 
+def test_internal_outpaint_prompt_preserves_completed_edit_context():
+    engine = OpenRouterImageEngine()
+    prompt = (
+        "OPERATOR PROMPT — EXECUTE EXACTLY\n"
+        "1. Убрать столбы и провода.\n"
+        "2. Сделать облачную погоду.\n\n"
+        "GENERATION MODE\nHYBRID"
+    )
+    internal = engine._internal_outpaint_prompt(prompt)
+    assert "INTERNAL HYBRID PASS 2/2" in internal
+    assert "GENERATION MODE\nOUTPAINT" in internal
+    assert "Убрать столбы и провода." in internal
+    assert "Сделать облачную погоду." in internal
+    assert "ALREADY EXECUTED IN PASS 1" in internal
+
+
 def test_prepared_request_content_length_is_exact():
     engine = OpenRouterImageEngine()
     body = b'{"model":"test","prompt":"x"}'
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "3.1.0"
+    assert prepared.headers["X-Marins-Transport-Engine"] == "3.2.0"
