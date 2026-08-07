@@ -3,7 +3,8 @@
 
   const MODE_PREFIX = '__MARINS_GENERATION_MODE__:';
   const MODES = {
-    hybrid: 'HYBRID · EDIT + OUTPAINT',
+    hybrid: 'HYBRID · EDIT / RELIGHT + OUTPAINT',
+    relight: 'RELIGHT · NEW LIGHTING',
     edit: 'IMAGE EDIT',
     outpaint: 'OUTPAINT'
   };
@@ -56,9 +57,10 @@
     const label = document.createElement('label');
     label.className = 'generation-mode-control';
     label.innerHTML = `
-      <span>РЕЖИМ</span>
-      <select id="environment-mode" aria-label="Режим генерации окружения">
+      <span>SKILL</span>
+      <select id="environment-mode" aria-label="Skill генерации окружения">
         <option value="hybrid">${MODES.hybrid}</option>
+        <option value="relight">${MODES.relight}</option>
         <option value="edit">${MODES.edit}</option>
         <option value="outpaint">${MODES.outpaint}</option>
       </select>
@@ -74,13 +76,13 @@
     style.textContent = `
       .generation-mode-control{display:flex;align-items:center;gap:7px;height:32px;border:1px solid var(--ink);padding:0 7px;background:var(--paper)}
       .generation-mode-control>span{font-size:7px;letter-spacing:.12em;color:var(--ink-2)}
-      .generation-mode-control select{height:28px;max-width:205px;border:0;background:transparent;font-size:7px;letter-spacing:.08em;font-weight:600;outline:none;cursor:pointer}
+      .generation-mode-control select{height:28px;max-width:245px;border:0;background:transparent;font-size:7px;letter-spacing:.08em;font-weight:600;outline:none;cursor:pointer}
       .generation-mode-control select:focus{box-shadow:inset 0 -2px 0 var(--accent)}
     `;
     document.head.appendChild(style);
 
     const version = document.querySelector('.version-mark');
-    if (version) version.textContent = 'V0.8.0 HYBRID';
+    if (version) version.textContent = 'V0.8.1 SKILLS';
   }
 
   async function responseJson(response) {
@@ -122,7 +124,7 @@
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || `Не удалось сохранить режим генерации: HTTP ${response.status}`);
+        throw new Error(text || `Не удалось сохранить skill генерации: HTTP ${response.status}`);
       }
       const updated = await responseJson(response);
       if (updated) scheduleVisibleCommentCount(updated);
