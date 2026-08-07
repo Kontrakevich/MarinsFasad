@@ -33,14 +33,15 @@ def capabilities(engine):
     }
 
 
-def test_nano_banana_and_hybrid_contract_are_hard_locked(monkeypatch):
+def test_nano_banana_and_skill_contract_are_hard_locked(monkeypatch):
     monkeypatch.setenv("OPENROUTER_IMAGE_MODEL", "openai/gpt-image-1")
     engine = OpenRouterImageEngine()
     assert engine.model == NANO_BANANA
     assert engine.required_model == NANO_BANANA
-    assert engine.transport_engine_version == "3.2.0"
+    assert engine.transport_engine_version == "3.3.0"
     assert engine.default_generation_mode == "hybrid"
-    assert engine.available_generation_modes == ("hybrid", "edit", "outpaint")
+    assert engine.available_generation_modes == ("hybrid", "relight", "edit", "outpaint")
+    assert engine.skill_contract_version == "outpaint-relight-edit-hybrid-v1"
     assert engine.environment_input_policy == "approved-geometry-only"
     assert engine.outpaint_detection_policy == "automatic-from-approved-geometry-transparency"
     assert engine.user_mask_required is False
@@ -123,6 +124,17 @@ def test_transport_uses_one_geometry_reference_and_hybrid_default(tmp_path, monk
     assert Path(result["effective_mask_path"]).is_file()
 
 
+def test_relight_mode_is_recognised_as_full_frame_semantic_skill():
+    engine = OpenRouterImageEngine()
+    prompt = (
+        f"{GENERATION_MODE_MARKER}\nRELIGHT\n\n"
+        "Сделать вечернее освещение, тёплый свет из окон и мокрый асфальт."
+    )
+    assert engine._mode_from_prompt(prompt) == "relight"
+    assert engine._normalize_generation_mode("relight") == "relight"
+    assert "relight" in engine.available_generation_modes
+
+
 def test_payload_contains_prompt_and_only_geometry_reference(tmp_path):
     geometry = tmp_path / "approved-geometry.png"
     make_geometry(geometry, (320, 240))
@@ -164,4 +176,4 @@ def test_prepared_request_content_length_is_exact():
     prepared = engine._prepare_http_request(body)
     assert prepared.body == body
     assert int(prepared.headers["Content-Length"]) == len(body)
-    assert prepared.headers["X-Marins-Transport-Engine"] == "3.2.0"
+    assert prepared.headers["X-Marins-Transport-Engine"] == "3.3.0"
