@@ -24,13 +24,16 @@ def test_only_skill_engine_is_imported_by_app_package():
         assert not (ROOT / "app" / f"{obsolete}.py").exists()
 
 
-def test_active_engine_contract_is_skill_v3300():
+def test_active_engine_contract_is_quality_v3400():
     engine = OpenRouterImageEngine()
-    assert engine.transport_engine_version == "3.3.0"
+    assert engine.transport_engine_version == "3.4.0"
     assert engine.model == "google/gemini-2.5-flash-image"
     assert engine.default_generation_mode == "hybrid"
     assert engine.available_generation_modes == ("hybrid", "relight", "edit", "outpaint")
-    assert engine.skill_contract_version == "outpaint-relight-edit-hybrid-v1"
+    assert engine.available_generation_qualities == ("draft", "standard", "high", "max")
+    assert engine.default_generation_quality == "high"
+    assert engine.skill_contract_version == "outpaint-relight-edit-hybrid-quality-v2"
+    assert engine.outpaint_fallback_mode == "quality-aware-edge-refine"
     assert engine.environment_input_policy == "approved-geometry-only"
     assert engine.outpaint_detection_policy == "automatic-from-approved-geometry-transparency"
     assert engine.provider_input_policy == "single-approved-geometry-reference"
