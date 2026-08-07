@@ -15,27 +15,19 @@ def test_devcontainer_autostarts_v080() -> None:
     assert config["postCreateCommand"] == "cd v080 && bash build.sh"
     assert config["postStartCommand"] == "bash v080/start.sh"
     assert config["portsAttributes"]["8070"]["label"].endswith("v0.8.0")
-    assert "release/start_v060.sh" not in config["postStartCommand"]
 
 
-def test_legacy_codespaces_launchers_redirect_to_v080() -> None:
-    start = (REPO_ROOT / "release" / "start_v060.sh").read_text("utf-8")
-    setup = (REPO_ROOT / "release" / "setup_v060.sh").read_text("utf-8")
-    assert 'exec bash "$ROOT/v080/start.sh"' in start
-    assert 'exec bash "$ROOT/v080/build.sh"' in setup
-
-
-def test_v080_start_synchronizes_current_ui() -> None:
+def test_v080_start_uses_single_stable_runtime() -> None:
     start = (REPO_ROOT / "v080" / "start.sh").read_text("utf-8")
-    assert 'EXPECTED_TRANSPORT_ENGINE="2.9.1"' in start
-    assert 'EXPECTED_PROMPT_CONTRACT="environment-system-v1.4"' in start
+    init = (REPO_ROOT / "v080" / "app" / "__init__.py").read_text("utf-8")
+    assert 'EXPECTED_TRANSPORT_ENGINE="3.0.0"' in start
     assert 'EXPECTED_MODEL="google/gemini-2.5-flash-image"' in start
     assert 'ui_single_window/index.html' in start
     assert 'ui_single_window/styles.css' in start
     assert 'ui_single_window/app-v080.js' in start
-    assert 'rm -f /tmp/marins-facade-v060.pid' in start
-    assert 'Environment input: approved corrected geometry only' in start
-    assert 'Outpaint detection: automatic from missing transparent regions' in start
-    assert 'User mask: does not exist' in start
-    assert 'Internal outpaint tiles: derived from approved geometry and allowed' in start
-    assert 'Provider input: one approved geometry reference' in start
+    assert 'Stable engine 3.0.0 verified' in start
+    assert 'Legacy policy chain: disabled' in start
+    assert 'stable_engine' in init
+    assert 'provider_policy' not in init
+    assert 'selective_policy' not in init
+    assert 'missing_region_policy' not in init
