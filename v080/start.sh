@@ -40,6 +40,7 @@ grep -q 'const ZOOM_STEP = 0.05' "$ROOT/app/web/app-v080.js"
 grep -q 'requestGridFullscreen' "$ROOT/app/web/app-v080.js"
 grep -q 'skill_engine' "$ROOT/app/__init__.py"
 grep -q 'transport_engine_version = "3.3.0"' "$ROOT/app/skill_engine.py"
+grep -q 'edge-tiles-on-placeholder' "$ROOT/app/skill_engine.py"
 grep -q "$EXPECTED_PROMPT_CONTRACT" "$ROOT/app/system_prompts.py"
 
 python -B - "$EXPECTED_TRANSPORT_ENGINE" "$EXPECTED_PROMPT_CONTRACT" "$EXPECTED_MODEL" "$EXPECTED_APP_VERSION" <<'PY'
@@ -66,6 +67,10 @@ if engine.default_generation_mode != "hybrid":
     raise SystemExit("Hybrid must be the default generation mode")
 if engine.outpaint_repair_mode != "hybrid-second-pass":
     raise SystemExit("Hybrid second-pass outpaint is not active")
+if engine.outpaint_fallback_mode != "edge-tiles-on-placeholder":
+    raise SystemExit("Automatic edge outpaint fallback is not active")
+if engine.outpaint_fallback_attempts_per_edge != 2:
+    raise SystemExit("Edge outpaint fallback retry policy mismatch")
 if engine.skill_contract_version != "outpaint-relight-edit-hybrid-v1":
     raise SystemExit("Explicit skill contract is not active")
 if engine.missing_region_transport_policy != "native-transparency-single-reference":
@@ -82,10 +87,11 @@ print("Skill Engine 3.3.0 verified")
 print(f"App version: {APP_VERSION}")
 print(f"Prompt contract: {PROMPT_CONTRACT_VERSION}")
 print(f"Image model locked: {engine.model}")
-print("OUTPAINT: pixel-exact outside missing regions")
+print("OUTPAINT: full-frame first, automatic edge fallback on blank placeholder")
+print("OUTPAINT fallback: TOP / BOTTOM / LEFT / RIGHT, up to 2 attempts per edge")
 print("RELIGHT: full-frame lighting/atmosphere; geometry locked")
 print("IMAGE EDIT: requested semantic edits retained")
-print("HYBRID: edit/relight first; outpaint second")
+print("HYBRID: edit/relight first; outpaint second; edge fallback if needed")
 print("Original source: archived; working master reduced before Perspective Grid")
 PY
 
@@ -129,6 +135,7 @@ PY
       echo "Prompt contract: $EXPECTED_PROMPT_CONTRACT"
       echo "Image model: $EXPECTED_MODEL"
       echo "Default skill: HYBRID"
+      echo "Outpaint fallback: edge-tiles-on-placeholder"
       cat "$HEALTH_FILE"
       exit 0
     fi
