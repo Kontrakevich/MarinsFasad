@@ -5,6 +5,7 @@ from PIL import Image
 from app.ai_engine import OpenRouterImageEngine
 from app.prompt_engine import (
     FINAL_COMMAND_MARKER,
+    GENERATION_MODE_MARKER,
     OPERATOR_PROMPT_MARKER,
     PromptContext,
     PromptEngine,
@@ -17,8 +18,8 @@ def test_ui_compiled_prompt_is_sent_to_nano_banana_verbatim(tmp_path: Path):
             stage="environment",
             master_prompt="ignored",
             comments=[
-                "Убрать только белый автомобиль справа.",
-                "На его месте продолжить покрытие парковки.",
+                "Убрать столбы и провода.",
+                "Сделать облачную погоду.",
             ],
             approved_geometry_asset="images/stages/geometry/candidate.png",
         ),
@@ -45,8 +46,10 @@ def test_ui_compiled_prompt_is_sent_to_nano_banana_verbatim(tmp_path: Path):
     assert len(payload["input_references"]) == 1
     assert OPERATOR_PROMPT_MARKER in payload["prompt"]
     assert FINAL_COMMAND_MARKER in payload["prompt"]
-    assert "Убрать только белый автомобиль справа." in payload["prompt"]
-    assert "На его месте продолжить покрытие парковки." in payload["prompt"]
+    assert GENERATION_MODE_MARKER in payload["prompt"]
+    assert "GENERATION MODE\nHYBRID" in payload["prompt"]
+    assert "Убрать столбы и провода." in payload["prompt"]
+    assert "Сделать облачную погоду." in payload["prompt"]
     assert compiled["prompt_transport_policy"] == "ui-compiled-prompt-sent-verbatim"
     assert compiled["prompt_sha256"]
 
@@ -68,6 +71,7 @@ def test_operator_prompt_is_primary_and_repeated_as_final_command(tmp_path: Path
 
     assert prompt.startswith(OPERATOR_PROMPT_MARKER)
     assert first_instruction < final_marker < last_instruction
-    assert "The operator prompt is the primary editing task." in prompt
-    assert "Automatic outpaint completion" in prompt
+    assert "First priority: execute every semantic edit requested by the operator" in prompt
+    assert "global weather/atmosphere changes" in prompt
+    assert "automatic outpaint" in prompt.lower()
     assert "mask" not in prompt.lower()
