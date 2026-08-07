@@ -14,24 +14,44 @@ AIEngineError = _engine_module.AIEngineError
 
 
 class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
-    """Final user contract: one approved geometry image, automatic outpaint."""
+    """Final contract: approved geometry only, automatic outpaint.
 
-    transport_engine_version = "2.9.0"
+    The user approves exactly one visual asset: the corrected geometry image.
+    Missing regions are derived from its alpha channel. Internal outpaint crops
+    produced from that approved image are allowed to reach Nano Banana, but they
+    are never treated as independent project assets or user inputs.
+    """
+
+    transport_engine_version = "2.9.1"
     environment_input_policy = "approved-geometry-only"
     outpaint_detection_policy = "automatic-from-approved-geometry-transparency"
     user_mask_required = False
+    internal_outpaint_tiles_allowed = True
+
+    @staticmethod
+    def _is_internal_outpaint_tile(project_root: Path, geometry_image: Path) -> bool:
+        try:
+            relative = geometry_image.resolve().relative_to(project_root.resolve())
+        except ValueError:
+            return False
+        parts = tuple(part.lower() for part in relative.parts)
+        return (
+            "outpaint-tiles" in parts
+            and relative.name.lower() in {"tile-base.png", "geometry-input.webp"}
+        )
 
     def _approval_contract(
         self,
         geometry_image: Path,
         outpaint_mask: Path,
     ) -> dict[str, Any]:
-        """Verify only the approved geometry asset.
+        """Verify the approved geometry or an internal crop derived from it.
 
-        The second path is an internal automatically generated outpaint plan. It
-        is not a project asset, is never approved by the user and does not take
-        part in the approval decision.
+        ``outpaint_mask`` is only a private processing plan required by legacy
+        method signatures. It is ignored for project approval and is never a
+        user-facing or approved project asset.
         """
+        geometry_image = Path(geometry_image)
         project_root = self._project_root_from_geometry(geometry_image)
         if project_root is None:
             return {
@@ -61,14 +81,16 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
             if expected_rel
             else None
         )
-        verified = (
-            geometry_status == "approved"
-            and pipeline_status == "approved"
-            and expected_geometry == geometry_image.resolve()
+        approved = geometry_status == "approved" and pipeline_status == "approved"
+        exact_geometry = expected_geometry == geometry_image.resolve()
+        internal_tile = approved and self._is_internal_outpaint_tile(
+            project_root,
+            geometry_image,
         )
-        if not verified:
+
+        if not approved or not (exact_geometry or internal_tile):
             raise AIEngineError(
-                "Для генерации нужен точный утверждённый результат коррекции геометрии.",
+                "Для генерации нужен утверждённый результат коррекции геометрии.",
                 details={
                     "provider_call_made": False,
                     "credits_spent": False,
@@ -77,16 +99,20 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
                     "pipeline_status": pipeline_status,
                     "expected_geometry": str(expected_geometry) if expected_geometry else None,
                     "received_geometry": str(geometry_image.resolve()),
+                    "internal_outpaint_tile": internal_tile,
                 },
             )
 
         return {
             "approval_verified": True,
-            "approval_source": "project.json",
+            "approval_source": (
+                "internal-derived-outpaint-tile" if internal_tile else "project.json"
+            ),
             "project_id": state.get("id"),
             "geometry_status": geometry_status,
             "pipeline_status": pipeline_status,
             "environment_input_policy": self.environment_input_policy,
+            "internal_outpaint_tile": internal_tile,
         }
 
     @staticmethod
@@ -95,7 +121,7 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
         approved_mask: Path,
         destination: Path,
     ) -> Path:
-        """Derive the private compositing plan only from geometry transparency."""
+        """Derive the private compositing plan only from image transparency."""
         with Image.open(geometry_image) as source:
             geometry = ImageOps.exif_transpose(source).convert("RGBA")
         automatic = geometry.getchannel("A").point(
@@ -105,6 +131,37 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
         destination.parent.mkdir(parents=True, exist_ok=True)
         automatic.save(destination, format="PNG", optimize=False)
         return destination
+
+    def _build_payload(
+        self,
+        *,
+        prompt: str,
+        geometry_image: Path,
+        outpaint_mask: Path,
+        provider_size: tuple[int, int],
+    ) -> dict:
+        """Nano Banana receives exactly one visual reference.
+
+        The private outpaint plan is intentionally not transmitted. Missing
+        pixels are already encoded inside the geometry reference by the previous
+        transport layer as an opaque service pattern.
+        """
+        provider_prompt, _ = self._provider_prompt(prompt)
+        return {
+            "model": self.required_model,
+            "prompt": provider_prompt,
+            "n": 1,
+            "size": f"{provider_size[0]}x{provider_size[1]}",
+            "quality": "high",
+            "output_format": "png",
+            "background": "opaque",
+            "input_references": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": self._data_url(geometry_image)},
+                },
+            ],
+        }
 
     def prepare_environment_inputs(
         self,
@@ -138,6 +195,7 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
                 "provider_reference_count": 1,
                 "input_reference_count": 1,
                 "generation_mode": "automatic-outpaint-and-selective-edit",
+                "internal_outpaint_tiles_allowed": self.internal_outpaint_tiles_allowed,
             }
         )
         return prepared
@@ -145,7 +203,7 @@ class OpenRouterImageEngine(_PreviousOpenRouterImageEngine):
     def _tile_prompt(self, original_prompt: str, tile_index: int) -> str:
         return (
             "OUTPAINT TILE RECONSTRUCTION — REQUIRED\n"
-            f"Tile {tile_index} is an enlarged crop from the approved corrected photograph.\n"
+            f"Tile {tile_index} is an enlarged crop automatically derived from the approved corrected photograph.\n"
             "The supplied image contains a magenta/cyan service pattern only where visual information is missing.\n"
             "Replace every service-pattern pixel with real photorealistic scene content. Continue the adjacent sky, facade, "
             "building edges, pavement, asphalt, ground lines, shadows, wires and perspective without seams.\n"
