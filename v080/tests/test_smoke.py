@@ -13,22 +13,22 @@ def test_health():
     payload = response.json()
     assert payload['version'] == '0.8.0'
     assert payload['runtime'] == 'standalone-v080'
-    assert payload['transport_policy'] == 'provider-aware-temporary-copy'
     assert payload['generation_mode'] == 'background-job-polling'
     assert payload['image_model'] == 'google/gemini-2.5-flash-image'
     assert payload['environment_input'] == 'approved-geometry-only'
     assert payload['outpaint_detection'] == 'automatic-from-approved-geometry'
-    assert OpenRouterImageEngine.transport_engine_version == '2.9.1'
-    assert OpenRouterImageEngine.required_model == 'google/gemini-2.5-flash-image'
-    assert OpenRouterImageEngine.environment_input_policy == 'approved-geometry-only'
-    assert OpenRouterImageEngine.outpaint_detection_policy == 'automatic-from-approved-geometry-transparency'
-    assert OpenRouterImageEngine.user_mask_required is False
-    assert OpenRouterImageEngine.internal_outpaint_tiles_allowed is True
-    assert OpenRouterImageEngine.provider_input_policy == 'single-approved-geometry-reference'
-    assert OpenRouterImageEngine.outpaint_qc_blocking is False
-    assert OpenRouterImageEngine.missing_region_transport_policy == 'opaque-marker-plus-zoomed-nano-banana-tiles'
-    assert OpenRouterImageEngine.outpaint_repair_mode == 'component-tiles'
-    assert OpenRouterImageEngine.outpaint_tile_max_calls == 8
+
+    engine = OpenRouterImageEngine()
+    assert OpenRouterImageEngine.transport_engine_version == '3.0.0'
+    assert engine.required_model == 'google/gemini-2.5-flash-image'
+    assert engine.environment_input_policy == 'approved-geometry-only'
+    assert engine.outpaint_detection_policy == 'automatic-from-approved-geometry-transparency'
+    assert engine.user_mask_required is False
+    assert engine.internal_outpaint_tiles_allowed is False
+    assert engine.provider_input_policy == 'single-approved-geometry-reference'
+    assert engine.outpaint_qc_blocking is False
+    assert engine.missing_region_transport_policy == 'opaque-marker-single-pass'
+    assert engine.outpaint_repair_mode == 'single-pass'
     assert ENVIRONMENT_SYSTEM_PROMPT
     assert PROMPT_CONTRACT_VERSION == 'environment-system-v1.4'
 
