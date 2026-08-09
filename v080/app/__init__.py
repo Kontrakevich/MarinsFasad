@@ -3,3 +3,7 @@ __version__ = "0.8.1"
 # One canonical runtime entrypoint. skill_engine owns HYBRID / RELIGHT /
 # IMAGE EDIT / OUTPAINT plus DRAFT / STANDARD / HIGH / MAX quality profiles.
 from . import skill_engine as _skill_engine  # noqa: F401,E402
+
+# System №1 Intelligence is native and observational: Layer 1 technical diagnosis
+# always precedes the gated Layer 2 human/logical alignment analysis.
+from .intelligence import integration as _system1_intelligence  # noqa: F401,E402
