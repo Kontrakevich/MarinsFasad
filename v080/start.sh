@@ -28,7 +28,7 @@ cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
 sed -i 's/resilient-fullframe-0806/quality-outpaint-3400/g; s/selective-nanobanana-0806/quality-outpaint-3400/g; s/geometry-only-outpaint-0806/quality-outpaint-3400/g; s/stable-nanobanana-3000/quality-outpaint-3400/g; s/working-master-3001/quality-outpaint-3400/g; s/hybrid-edit-3100/quality-outpaint-3400/g; s/hybrid-two-pass-3200/quality-outpaint-3400/g; s/skill-contracts-3300/quality-outpaint-3400/g' "$ROOT/app/web/index.html"
 sed -i 's/V0.8.0/V0.8.1 QUALITY/g; s/ORIGINAL MASTER/WORKING MASTER/g; s/NO DOWNSCALE/GENERATION SCALE/g; s/Файл сохраняется без уменьшения и перекодирования. Preview существует отдельно./Оригинал сохраняется в архиве проекта. Для сетки и генерации используется облегчённый рабочий master./g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
-cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" "$ROOT/ui_single_window/grid-ux-patch.js" "$ROOT/ui_single_window/hybrid-mode-patch.js" > "$ROOT/app/web/app-v080.js"
+cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" "$ROOT/ui_single_window/grid-ux-patch.js" "$ROOT/ui_single_window/hybrid-mode-patch.js" "$ROOT/ui_single_window/system1-intelligence-patch.js" > "$ROOT/app/web/app-v080.js"
 sed -i 's/Сгенерируйте окружение по всему canvas/Выполните выбранный skill генерации/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/Выполните выбранный skill генерации/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Production policy: original resolution\./Рабочий master оптимизирован до размера генерации; исходный файл сохранён в архиве проекта./g' "$ROOT/app/web/app-v080.js"
@@ -37,11 +37,15 @@ cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
 
 grep -q 'RELIGHT · NEW LIGHTING' "$ROOT/app/web/app-v080.js"
 grep -q 'environment-quality' "$ROOT/app/web/app-v080.js"
+grep -q 'SYSTEM №1' "$ROOT/app/web/app-v080.js"
+grep -q 'L1 TECHNICAL → L2 HUMAN ALIGNMENT' "$ROOT/app/web/app-v080.js"
 grep -q 'const ZOOM_STEP = 0.05' "$ROOT/app/web/app-v080.js"
 grep -q 'requestGridFullscreen' "$ROOT/app/web/app-v080.js"
 grep -q 'skill_engine' "$ROOT/app/__init__.py"
+grep -q 'system1_intelligence' "$ROOT/app/__init__.py"
 grep -q 'transport_engine_version = "3.4.0"' "$ROOT/app/skill_engine.py"
 grep -q 'quality-aware-edge-refine' "$ROOT/app/skill_engine.py"
+grep -q 'GATED_BY_LAYER1' "$ROOT/app/intelligence/orchestrator.py"
 grep -q "$EXPECTED_PROMPT_CONTRACT" "$ROOT/app/system_prompts.py"
 
 python -B - "$EXPECTED_TRANSPORT_ENGINE" "$EXPECTED_PROMPT_CONTRACT" "$EXPECTED_MODEL" "$EXPECTED_APP_VERSION" <<'PY'
@@ -49,6 +53,8 @@ import sys
 from app.ai_engine import OpenRouterImageEngine
 from app.config import APP_VERSION
 from app.image_engine import ImageEngine
+from app.intelligence.orchestrator import System1Intelligence
+from app.project_engine import ProjectEngine
 from app.system_prompts import PROMPT_CONTRACT_VERSION
 
 expected_engine, expected_prompt, expected_model, expected_version = sys.argv[1:5]
@@ -86,6 +92,8 @@ if engine.user_mask_required is not False:
     raise SystemExit("User mask must not exist")
 if image_engine._generation_canvas(8064, 6048) != engine._select_provider_size(8064, 6048):
     raise SystemExit("Working-master scale does not match generation scale")
+if System1Intelligence.version != "1.0.0" or not hasattr(ProjectEngine, "_system1_original_read"):
+    raise SystemExit("System1 Intelligence is not active")
 print("Skill Engine 3.4.0 verified")
 print(f"App version: {APP_VERSION}")
 print(f"Prompt contract: {PROMPT_CONTRACT_VERSION}")
@@ -95,6 +103,9 @@ print("Generation quality: DRAFT / STANDARD / HIGH / MAXIMUM; default HIGH")
 print("OUTPAINT HIGH/MAX: automatic context-rich edge refinement")
 print("OUTPAINT seams: tone harmonization + feather only inside missing regions")
 print("Prompt: complete compiled context propagated to outpaint/refinement")
+print("System №1 Intelligence 1.0.0: active")
+print("System №1 precedence: Layer 1 technical -> gated Layer 2 human alignment")
+print("System №1 storage: native SQLite; observer cannot break the production pipeline")
 print("Original source: archived; working master reduced before Perspective Grid")
 PY
 
@@ -112,7 +123,7 @@ cleanup_failed_start() {
 
 for _ in $(seq 1 30); do
   if ! kill -0 "$NEW_PID" 2>/dev/null; then
-    echo "Marins Facade v0.8.1 Quality process exited during startup." >&2
+    echo "Marins Facade v0.8.1 Quality + System1 process exited during startup." >&2
     tail -100 "$LOG_FILE" >&2 || true
     rm -f "$PID_FILE"
     exit 1
@@ -133,13 +144,14 @@ ok = (
 raise SystemExit(0 if ok else 1)
 PY
     then
-      echo "Marins Facade v0.8.1 Quality started on port 8070 (PID $NEW_PID)"
+      echo "Marins Facade v0.8.1 Quality + System1 started on port 8070 (PID $NEW_PID)"
       echo "Transport engine: $EXPECTED_TRANSPORT_ENGINE"
       echo "Prompt contract: $EXPECTED_PROMPT_CONTRACT"
       echo "Image model: $EXPECTED_MODEL"
       echo "Default skill: HYBRID"
       echo "Default quality: HIGH"
       echo "Outpaint refinement: quality-aware-edge-refine"
+      echo "System1 Intelligence: Layer1 technical -> gated Layer2 alignment"
       cat "$HEALTH_FILE"
       exit 0
     fi
@@ -147,7 +159,7 @@ PY
   sleep 1
 done
 
-echo "Server did not expose the required v0.8.1 Quality runtime." >&2
+echo "Server did not expose the required v0.8.1 Quality + System1 runtime." >&2
 tail -100 "$LOG_FILE" >&2 || true
 cleanup_failed_start
 exit 1
