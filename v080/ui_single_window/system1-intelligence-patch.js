@@ -5,8 +5,6 @@
   let activeProjectId = '';
   let latestIntelligence = null;
 
-  const projectPattern = /\/api\/projects\/([^/?]+)(?:\?.*)?$/;
-
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   }
@@ -46,8 +44,7 @@
         const response = await previousFetch(`/api/projects/${activeProjectId}`, {cache: 'no-store'});
         if (!response.ok) return;
         const project = await response.json();
-        latestIntelligence = project?.system1_intelligence || null;
-        render(latestIntelligence);
+        acceptProject(project);
       } catch (_) {}
     });
 
@@ -96,19 +93,24 @@
     `;
   }
 
+  function acceptProject(project) {
+    if (!project) return;
+    if (project.id) activeProjectId = project.id;
+    if (project.system1_intelligence) {
+      latestIntelligence = project.system1_intelligence;
+      render(latestIntelligence);
+    }
+  }
+
   window.fetch = async function system1Fetch(input, init = {}) {
     installPanel();
     const response = await previousFetch(input, init);
     const url = typeof input === 'string' ? input : input?.url || '';
-    const match = url.match(projectPattern);
-    if (match && !url.includes('/history') && !url.includes('/diagnostics') && !url.includes('/assets/')) {
-      activeProjectId = match[1];
+    if (!url.includes('/assets/')) {
       try {
-        const project = await response.clone().json();
-        if (project?.system1_intelligence) {
-          latestIntelligence = project.system1_intelligence;
-          render(latestIntelligence);
-        }
+        const payload = await response.clone().json();
+        if (payload?.system1_intelligence) acceptProject(payload);
+        if (payload?.project?.system1_intelligence) acceptProject(payload.project);
       } catch (_) {}
     }
     return response;
