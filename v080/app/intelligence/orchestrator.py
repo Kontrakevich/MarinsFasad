@@ -95,8 +95,13 @@ class System1Intelligence:
 
         enriched = dict(payload)
         evidence_ref = None
-        if event_type == "PromptCompiled" and payload.get("path"):
-            prompt_path = engine.path(project_id) / str(payload["path"])
+        prompt_rel = None
+        if event_type == "PromptCompiled":
+            prompt_rel = payload.get("path")
+        elif event_type == "GenerationPayloadPrepared":
+            prompt_rel = generation.get("prompt")
+        if prompt_rel:
+            prompt_path = engine.path(project_id) / str(prompt_rel)
             if prompt_path.is_file():
                 text = prompt_path.read_text("utf-8")
                 enriched.update({
@@ -106,14 +111,24 @@ class System1Intelligence:
                 })
                 evidence_ref = str(prompt_path.relative_to(engine.path(project_id)))
 
+        project_dir = engine.path(project_id)
+        report = self._engine_report(project_dir)
+        if event_type in {"EnvironmentGenerationCompleted", "EnvironmentGenerationFailed"} and report:
+            enriched["engine_report_summary"] = {
+                "generation_mode": report.get("generation_mode"),
+                "generation_quality": report.get("generation_quality"),
+                "provider_call_count": report.get("provider_call_count"),
+                "outpaint_refinement_used": report.get("outpaint_refinement_used"),
+                "outpaint_placeholder_detected": report.get("outpaint_placeholder_detected"),
+                "fallback_remaining_pixels": report.get("fallback_remaining_pixels"),
+            }
+
         self.store.add_event(
             run_id=run_id, project_id=project_id, event_type=event_type,
             component=self._component(event_type), stage=state.get("active_stage"),
             status=self._status(event_type), payload=enriched, evidence_ref=evidence_ref,
         )
 
-        project_dir = engine.path(project_id)
-        report = self._engine_report(project_dir)
         quality = (state.get("quality") or {}).get("environment_candidate") or {}
 
         if event_type == "EnvironmentGenerationCompleted" and run_id:
