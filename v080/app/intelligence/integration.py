@@ -44,7 +44,10 @@ def write_without_transient_intelligence(self: ProjectEngine, project_id: str, s
         return _original_write(self, project_id, state)
     clean = dict(state)
     clean.pop("system1_intelligence", None)
-    return _original_write(self, project_id, clean)
+    _original_write(self, project_id, clean)
+    # Preserve ProjectEngine.write semantics for callers holding the enriched state.
+    if clean.get("updated_at"):
+        state["updated_at"] = clean["updated_at"]
 
 
 def record_with_intelligence(self: ProjectEngine, project_id: str, event_type: str,
