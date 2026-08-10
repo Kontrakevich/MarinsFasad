@@ -19,7 +19,7 @@ def make_plan(path: Path) -> Path:
     return path
 
 
-def test_white_outpaint_is_recorded_for_fallback_instead_of_raising(tmp_path: Path) -> None:
+def test_white_outpaint_is_recorded_for_refinement_instead_of_raising(tmp_path: Path) -> None:
     engine = OpenRouterImageEngine()
     geometry = make_geometry(tmp_path / "geometry.png")
     plan = make_plan(tmp_path / "plan.png")
@@ -52,7 +52,7 @@ def test_white_outpaint_is_recorded_for_fallback_instead_of_raising(tmp_path: Pa
     assert result["generation_mode"] == "outpaint"
 
 
-def test_placeholder_automatically_promotes_edge_fallback_candidate(monkeypatch, tmp_path: Path) -> None:
+def test_placeholder_automatically_promotes_quality_edge_refinement_candidate(monkeypatch, tmp_path: Path) -> None:
     engine = OpenRouterImageEngine()
     geometry = make_geometry(tmp_path / "geometry.png")
     plan = make_plan(tmp_path / "plan.png")
@@ -61,21 +61,23 @@ def test_placeholder_automatically_promotes_edge_fallback_candidate(monkeypatch,
 
     calls = []
 
-    def fake_fallback(**kwargs):
+    def fake_refinement(**kwargs):
         calls.append(kwargs)
         return {
             "candidate": str(repaired_candidate),
+            "outpaint_refinement_used": True,
             "outpaint_fallback_used": True,
-            "outpaint_fallback_mode": "edge-tiles-on-placeholder",
-            "outpaint_fallback_reason": "full-frame-placeholder",
+            "outpaint_fallback_mode": engine.outpaint_fallback_mode,
+            "outpaint_refinement_reason": "full-frame-placeholder",
             "fallback_provider_calls": 2,
             "fallback_failed_edges": [],
             "fallback_remaining_pixels": 0,
+            "fallback_final_placeholder": {"outpaint_placeholder_detected": False},
         }
 
-    monkeypatch.setattr(engine, "_run_edge_tile_fallback", fake_fallback)
+    monkeypatch.setattr(engine, "_run_edge_tile_refinement", fake_refinement)
 
-    result = engine._repair_placeholder_if_needed(
+    result = engine._repair_or_refine_outpaint(
         result={
             "candidate": str(tmp_path / "bad.png"),
             "automatic_outpaint_plan": str(plan),
@@ -83,7 +85,11 @@ def test_placeholder_automatically_promotes_edge_fallback_candidate(monkeypatch,
             "provider_call_count": 1,
         },
         kwargs={
-            "prompt": "GENERATION MODE\nOUTPAINT\nReconstruct missing surroundings.",
+            "prompt": (
+                "GENERATION MODE\nOUTPAINT\n\n"
+                "GENERATION QUALITY\nSTANDARD\n\n"
+                "Reconstruct missing surroundings."
+            ),
             "geometry_image": geometry,
             "outpaint_mask": plan,
             "output_dir": tmp_path / "environment",
@@ -98,26 +104,32 @@ def test_placeholder_automatically_promotes_edge_fallback_candidate(monkeypatch,
     assert result["initial_outpaint_placeholder_detected"] is True
     assert result["outpaint_placeholder_detected"] is False
     assert result["outpaint_fallback_used"] is True
+    assert result["outpaint_fallback_mode"] == "quality-aware-edge-refine"
     assert result["provider_call_count"] == 3
 
 
-def test_valid_outpaint_does_not_trigger_fallback(monkeypatch, tmp_path: Path) -> None:
+def test_standard_valid_outpaint_does_not_trigger_extra_refinement(monkeypatch, tmp_path: Path) -> None:
     engine = OpenRouterImageEngine()
     called = False
 
-    def forbidden_fallback(**kwargs):
+    def forbidden_refinement(**kwargs):
         nonlocal called
         called = True
-        raise AssertionError("fallback must not run")
+        raise AssertionError("quality edge refinement must not run for a valid STANDARD result")
 
-    monkeypatch.setattr(engine, "_run_edge_tile_fallback", forbidden_fallback)
+    monkeypatch.setattr(engine, "_run_edge_tile_refinement", forbidden_refinement)
     original = {"candidate": "ok.png", "outpaint_placeholder_detected": False}
-    result = engine._repair_placeholder_if_needed(
+    result = engine._repair_or_refine_outpaint(
         result=original,
-        kwargs={"output_dir": tmp_path},
+        kwargs={
+            "prompt": "GENERATION MODE\nOUTPAINT\n\nGENERATION QUALITY\nSTANDARD",
+            "output_dir": tmp_path,
+        },
         mode="outpaint",
     )
 
     assert result is original
     assert result["outpaint_fallback_used"] is False
+    assert result["outpaint_refinement_used"] is False
+    assert result["generation_quality"] == "standard"
     assert called is False
