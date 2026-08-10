@@ -13,6 +13,22 @@ def test_generation_polling_retries_transient_codespaces_errors():
     assert "Запрос не будет продублирован" in bridge
 
 
+def test_generation_status_404_recovers_from_persisted_project_without_duplicate_start():
+    bridge = (ROOT / "ui_single_window" / "async-generation-bridge.js").read_text("utf-8")
+    assert "recoverStatusFromProject" in bridge
+    assert "result.status === 404" in bridge
+    assert "statusResult.status === 404" in bridge
+    assert "normalizeProjectGeneration" in bridge
+    assert "Never duplicate the generation request" in bridge
+    assert "return pollStatus(statusUrl, details.projectId" in bridge
+
+
+def test_frontend_cache_key_changes_with_status_recovery_bridge():
+    index = (ROOT / "ui_single_window" / "index.html").read_text("utf-8")
+    assert "system1-status-recovery-3410" in index
+    assert "app-v080.js?v=hybrid-two-pass-3200-system1-status-recovery-3410" in index
+
+
 def test_quality_build_keeps_resilient_generation_bridge():
     build = (ROOT / "build.sh").read_text("utf-8")
     start = (ROOT / "start.sh").read_text("utf-8")
