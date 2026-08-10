@@ -78,6 +78,26 @@ def test_network_timeout_retries_and_reports_exhaustion(monkeypatch) -> None:
     assert calls == 3
 
 
+def test_provider_root_cause_stays_visible_after_single_pass_wrapper(monkeypatch) -> None:
+    engine = OpenRouterImageEngine()
+
+    def fake_single_pass(self, **kwargs):
+        raise AIEngineError(
+            "Nano Banana не смогла выполнить генерацию через OpenRouter. Подробности сохранены в диагностике.",
+            details={"provider_error": "OpenRouter 502: upstream unavailable"},
+        )
+
+    monkeypatch.setattr(SkillEngine, "_single_pass", fake_single_pass)
+
+    try:
+        engine._single_pass(prompt="test")
+    except AIEngineError as exc:
+        assert str(exc) == "Nano Banana / OpenRouter: OpenRouter 502: upstream unavailable"
+        assert exc.details["provider_error"].startswith("OpenRouter 502")
+    else:
+        raise AssertionError("AIEngineError expected")
+
+
 def test_active_runtime_is_retry_wrapper() -> None:
     engine = OpenRouterImageEngine()
     assert engine.transient_provider_statuses == frozenset({408, 425, 429, 500, 502, 503, 504})
