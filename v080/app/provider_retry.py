@@ -23,6 +23,14 @@ class OpenRouterImageEngine(_SkillOpenRouterImageEngine):
     provider_retry_max_attempts = 4
     provider_retry_policy = "transient-gateway-network-exponential-backoff-v1"
 
+    def __init__(self) -> None:
+        super().__init__()
+        # _runtime is thread-local on the hybrid runtime class and therefore shared
+        # by every engine instance created in the same thread. Keep an explicit
+        # per-instance owner token so retry diagnostics can never leak from an old
+        # engine/run into a new one.
+        self._provider_retry_owner_token = object()
+
     @staticmethod
     def _retry_delay(attempt: int, response: requests.Response | None = None) -> float:
         if response is not None:
@@ -34,11 +42,16 @@ class OpenRouterImageEngine(_SkillOpenRouterImageEngine):
                 pass
         return min(4.0, 0.65 * (2 ** max(0, attempt - 1)))
 
+    def _reset_retry_log(self) -> list[dict[str, Any]]:
+        self._runtime.provider_retry_owner = self._provider_retry_owner_token
+        self._runtime.provider_transient_retries = []
+        return self._runtime.provider_transient_retries
+
     def _retry_log(self) -> list[dict[str, Any]]:
+        owner = getattr(self._runtime, "provider_retry_owner", None)
         log = getattr(self._runtime, "provider_transient_retries", None)
-        if log is None:
-            log = []
-            self._runtime.provider_transient_retries = log
+        if owner is not self._provider_retry_owner_token or log is None:
+            return self._reset_retry_log()
         return log
 
     def _send_prepared(self, prepared_request: requests.PreparedRequest) -> requests.Response:
@@ -111,11 +124,11 @@ class OpenRouterImageEngine(_SkillOpenRouterImageEngine):
             ) from exc
 
     def generate_environment(self, **kwargs) -> dict:
-        self._runtime.provider_transient_retries = []
+        self._reset_retry_log()
         try:
             result = super().generate_environment(**kwargs)
         except AIEngineError as exc:
-            retries = list(getattr(self._runtime, "provider_transient_retries", []) or [])
+            retries = list(self._retry_log())
             if not retries:
                 raise
             details = dict(getattr(exc, "details", {}) or {})
@@ -124,7 +137,7 @@ class OpenRouterImageEngine(_SkillOpenRouterImageEngine):
             details["provider_retry_count"] = len(retries)
             raise AIEngineError(str(exc), details=details) from exc
 
-        retries = list(getattr(self._runtime, "provider_transient_retries", []) or [])
+        retries = list(self._retry_log())
         result["provider_retry_policy"] = self.provider_retry_policy
         result["provider_transient_retries"] = retries
         result["provider_retry_count"] = len(retries)
