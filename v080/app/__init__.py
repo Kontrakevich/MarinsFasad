@@ -1,8 +1,12 @@
 __version__ = "0.8.1"
 
-# One canonical runtime entrypoint. skill_engine owns HYBRID / RELIGHT /
+# Canonical generation runtime. skill_engine owns HYBRID / RELIGHT /
 # IMAGE EDIT / OUTPAINT plus DRAFT / STANDARD / HIGH / MAX quality profiles.
 from . import skill_engine as _skill_engine  # noqa: F401,E402
+
+# Final transport resilience layer: retry only transient OpenRouter gateway/network
+# failures without changing generation semantics or duplicating user jobs.
+from . import provider_retry as _provider_retry  # noqa: F401,E402
 
 # System №1 Intelligence is native and observational: Layer 1 technical diagnosis
 # always precedes the gated Layer 2 human/logical alignment analysis.
