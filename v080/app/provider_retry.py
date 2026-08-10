@@ -94,6 +94,22 @@ class OpenRouterImageEngine(_SkillOpenRouterImageEngine):
             details={"reason": "provider_retry_internal_error"},
         )
 
+    def _single_pass(self, **kwargs) -> dict:
+        try:
+            return super()._single_pass(**kwargs)
+        except AIEngineError as exc:
+            details = dict(getattr(exc, "details", {}) or {})
+            provider_error = str(details.get("provider_error") or "").strip()
+            if not provider_error:
+                raise
+            # Keep the actual provider cause visible to the status endpoint and
+            # System №1 instead of collapsing the failure to a synthetic HTTP 502.
+            visible = provider_error[:1800]
+            raise AIEngineError(
+                f"Nano Banana / OpenRouter: {visible}",
+                details=details,
+            ) from exc
+
     def generate_environment(self, **kwargs) -> dict:
         self._runtime.provider_transient_retries = []
         try:
