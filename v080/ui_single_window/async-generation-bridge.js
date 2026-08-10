@@ -59,7 +59,48 @@
     }
   }
 
-  async function pollStatus(statusUrl, deadline) {
+  function normalizeProjectGeneration(project) {
+    const generation = project?.generation || {};
+    let status = generation.status || project?.pipeline?.environment || 'idle';
+    if (status === 'review' || status === 'approved') status = 'completed';
+    if (status === 'ready' && project?.assets?.environment_candidate) status = 'completed';
+    return {
+      job_id: generation.job_id || null,
+      status,
+      error: generation.error || null,
+      project
+    };
+  }
+
+  async function recoverStatusFromProject(projectId) {
+    const projectResult = await safeFetch(`/api/projects/${projectId}`, {
+      method: 'GET',
+      cache: 'no-store',
+      headers: {
+        'Accept': 'application/json',
+        'Cache-Control': 'no-cache'
+      }
+    });
+
+    if (projectResult.networkError) {
+      return {kind: 'transient'};
+    }
+    if (TRANSIENT_HTTP_STATUSES.has(projectResult.status)) {
+      return {kind: 'transient'};
+    }
+    if (projectResult.status === 404) {
+      return {kind: 'missing-project'};
+    }
+    if (!projectResult.ok) {
+      return {kind: 'transient'};
+    }
+
+    const project = await readJson(projectResult);
+    if (!project) return {kind: 'transient'};
+    return {kind: 'project', status: normalizeProjectGeneration(project)};
+  }
+
+  async function pollStatus(statusUrl, projectId, deadline) {
     let transientFailures = 0;
 
     while (Date.now() < deadline) {
@@ -85,15 +126,31 @@
         continue;
       }
 
-      if (!result.ok) {
+      let status = null;
+      if (result.status === 404) {
+        // Codespaces / stale frontend-server combinations can temporarily expose
+        // the project API while the dedicated status route is unavailable.
+        // Never duplicate the generation request: recover from persisted project state.
+        const recovery = await recoverStatusFromProject(projectId);
+        if (recovery.kind === 'missing-project') {
+          return jsonResponse({detail: 'Проект генерации больше не найден.'}, 404);
+        }
+        if (recovery.kind !== 'project') {
+          transientFailures += 1;
+          showProgress('processing', transientFailures);
+          continue;
+        }
+        status = recovery.status;
+      } else if (!result.ok) {
         const payload = await readJson(result);
         return jsonResponse(
           {detail: payload?.detail || `Ошибка проверки статуса генерации: HTTP ${result.status}`},
           result.status
         );
+      } else {
+        status = await readJson(result);
       }
 
-      const status = await readJson(result);
       if (!status) {
         transientFailures += 1;
         showProgress('processing', transientFailures);
@@ -158,6 +215,24 @@
             502
           );
         }
+      } else if (!statusResult.networkError && statusResult.status === 404) {
+        const recovery = await recoverStatusFromProject(projectId);
+        const status = recovery.kind === 'project' ? recovery.status : null;
+        if (status?.status === 'queued' || status?.status === 'processing') {
+          return jsonResponse(
+            {job_id: status.job_id, status: status.status, status_url: statusUrl},
+            202
+          );
+        }
+        if (status?.status === 'completed') {
+          return jsonResponse(status.project, 200);
+        }
+        if (status?.status === 'error') {
+          return jsonResponse(
+            {detail: status.error || 'Генерация окружения завершилась с ошибкой.'},
+            502
+          );
+        }
       }
       await sleep(RETRY_INTERVAL_MS);
     }
@@ -181,6 +256,6 @@
       || `/api/projects/${details.projectId}/environment/generation-status`;
     showProgress(started?.status || 'queued');
 
-    return pollStatus(statusUrl, Date.now() + MAX_WAIT_MS);
+    return pollStatus(statusUrl, details.projectId, Date.now() + MAX_WAIT_MS);
   };
 })();
