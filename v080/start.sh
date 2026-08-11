@@ -13,17 +13,17 @@ EXPECTED_PROMPT_ADAPTER="1.0.1"
 # Do deterministic checks before touching a healthy server.
 cd "$ROOT"
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
-sed -i 's/prompt-workspace-3430/system1-command-console-3440/g; s/resilient-fullframe-0806/quality-outpaint-3400/g; s/selective-nanobanana-0806/quality-outpaint-3400/g; s/geometry-only-outpaint-0806/quality-outpaint-3400/g; s/stable-nanobanana-3000/quality-outpaint-3400/g; s/working-master-3001/quality-outpaint-3400/g; s/hybrid-edit-3100/quality-outpaint-3400/g; s/hybrid-two-pass-3200/quality-outpaint-3400/g; s/skill-contracts-3300/quality-outpaint-3400/g' "$ROOT/app/web/index.html"
+sed -i 's/prompt-workspace-3430/system1-console-all-3450/g; s/system1-command-console-3440/system1-console-all-3450/g; s/resilient-fullframe-0806/quality-outpaint-3400/g; s/selective-nanobanana-0806/quality-outpaint-3400/g; s/geometry-only-outpaint-0806/quality-outpaint-3400/g; s/stable-nanobanana-3000/quality-outpaint-3400/g; s/working-master-3001/quality-outpaint-3400/g; s/hybrid-edit-3100/quality-outpaint-3400/g; s/hybrid-two-pass-3200/quality-outpaint-3400/g; s/skill-contracts-3300/quality-outpaint-3400/g' "$ROOT/app/web/index.html"
 sed -i 's/V0.8.0/V0.8.1 QUALITY/g; s/ORIGINAL MASTER/WORKING MASTER/g; s/NO DOWNSCALE/GENERATION SCALE/g; s/Файл сохраняется без уменьшения и перекодирования. Preview существует отдельно./Оригинал сохраняется в архиве проекта. Для сетки и генерации используется облегчённый рабочий master./g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
-cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" "$ROOT/ui_single_window/grid-ux-patch.js" "$ROOT/ui_single_window/hybrid-mode-patch.js" "$ROOT/ui_single_window/system1-intelligence-patch.js" "$ROOT/ui_single_window/workspace-controls-patch.js" "$ROOT/ui_single_window/command-console-patch.js" > "$ROOT/app/web/app-v080.js"
+cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" "$ROOT/ui_single_window/grid-ux-patch.js" "$ROOT/ui_single_window/hybrid-mode-patch.js" "$ROOT/ui_single_window/system1-intelligence-patch.js" "$ROOT/ui_single_window/workspace-controls-patch.js" "$ROOT/ui_single_window/command-console-patch.js" "$ROOT/ui_single_window/lower-console-patch.js" "$ROOT/ui_single_window/minimum-font-patch.js" > "$ROOT/app/web/app-v080.js"
 sed -i 's/Сгенерируйте окружение по всему canvas/Выполните выбранный skill генерации/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/Выполните выбранный skill генерации/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Production policy: original resolution\./Рабочий master оптимизирован до размера генерации; исходный файл сохранён в архиве проекта./g' "$ROOT/app/web/app-v080.js"
 sed -i 's/V0.8.0 HYBRID/V0.8.1 QUALITY/g; s/V0.8.1 HYBRID/V0.8.1 QUALITY/g; s/V0.8.1 SKILLS/V0.8.1 QUALITY/g' "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
 
-grep -q 'system1-command-console-3440' "$ROOT/app/web/index.html"
+grep -q 'system1-console-all-3450' "$ROOT/app/web/index.html"
 grep -q 'RELIGHT · NEW LIGHTING' "$ROOT/app/web/app-v080.js"
 grep -q 'environment-quality' "$ROOT/app/web/app-v080.js"
 grep -q 'SYSTEM №1' "$ROOT/app/web/app-v080.js"
@@ -32,6 +32,11 @@ grep -q 'SYSTEM №1 READY' "$ROOT/app/web/app-v080.js"
 grep -q 'COMMAND CONSOLE' "$ROOT/app/web/app-v080.js"
 grep -q 'startDetachedPolling' "$ROOT/app/web/app-v080.js"
 grep -q 'projectSnapshotResponse' "$ROOT/app/web/app-v080.js"
+grep -q 'commandHistory' "$ROOT/app/web/app-v080.js"
+grep -q 'commandCandidates' "$ROOT/app/web/app-v080.js"
+grep -q 'commandEvents' "$ROOT/app/web/app-v080.js"
+grep -q '.bottom-pane{display:none!important}' "$ROOT/app/web/app-v080.js"
+grep -q 'const MIN_FONT_PT = 10' "$ROOT/app/web/app-v080.js"
 grep -q 'save-prompt-edit' "$ROOT/app/web/app-v080.js"
 grep -q 'delete-project' "$ROOT/app/web/app-v080.js"
 grep -q 'nano_banana_prompt_adapter' "$ROOT/app/__init__.py"
@@ -98,6 +103,8 @@ print(f"Image model locked: {engine.model}")
 print(f"Nano Banana Prompt Adapter {expected_adapter}: active")
 print("System №1 Command Console: active")
 print("Generation UI: detached background polling")
+print("Lower workspace: HISTORY / CANDIDATES / EVENTS moved to console")
+print("Typography: minimum font size 10 pt enforced")
 print("Prompt editor: final provider prompt is editable and versioned")
 print("Project deletion: active except during running generation")
 print("System №1 Intelligence 1.0.0: active")
@@ -165,6 +172,8 @@ PY
       echo "Nano Banana Prompt Adapter: $EXPECTED_PROMPT_ADAPTER"
       echo "System1 Command Console: active"
       echo "Generation polling: detached background mode"
+      echo "Lower workspace: history/candidates/events in console"
+      echo "Minimum font size: 10 pt"
       echo "Prompt editor + project deletion: active"
       cat "$HEALTH_FILE"
       exit 0
@@ -173,7 +182,7 @@ PY
   sleep 0.2
 done
 
-echo "Server did not expose the required v0.8.1 command-console runtime." >&2
+echo "Server did not expose the required v0.8.1 console-only runtime." >&2
 tail -100 "$LOG_FILE" >&2 || true
 cleanup_failed_start
 exit 1
