@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import threading
@@ -52,6 +53,11 @@ def _set_job(project_id: str, **updates) -> dict:
         return dict(current)
 
 
+def _clear_job(project_id: str) -> None:
+    with _generation_jobs_lock:
+        _generation_jobs.pop(project_id, None)
+
+
 def _remove_legacy_mask_state(state: dict) -> bool:
     """Remove obsolete user-facing mask artifacts from older projects."""
     changed = False
@@ -85,7 +91,7 @@ def _client_state(state: dict) -> dict:
     return result
 
 
-def _compile_prompt(project_id: str, stage: str) -> dict:
+def _compile_prompt_base(project_id: str, stage: str) -> dict:
     state = _read_project(project_id)
     comments = [
         item["text"]
@@ -110,7 +116,74 @@ def _compile_prompt(project_id: str, stage: str) -> dict:
             else ""
         ),
     )
-    return prompts.compile(context, projects.path(project_id))
+    compiled = prompts.compile(context, projects.path(project_id))
+    if stage != "environment" or not hasattr(ai_images, "prompt_adapter_metadata"):
+        compiled["prompt_source"] = "compiled"
+        return compiled
+
+    internal_prompt = str(compiled.get("prompt") or "")
+    internal_path = str(compiled.get("path") or "")
+    internal_sha = str(compiled.get("prompt_sha256") or hashlib.sha256(internal_prompt.encode("utf-8")).hexdigest())
+    adapter = ai_images.prompt_adapter_metadata(internal_prompt)
+    provider_prompt = str(adapter["provider_prompt"])
+    folder = projects.path(project_id) / "prompts" / stage
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    provider_path = folder / f"nano_banana_{stamp}.txt"
+    provider_path.write_text(provider_prompt + "\n", "utf-8")
+
+    result = dict(compiled)
+    result.update(adapter)
+    result.update(
+        {
+            "internal_prompt": internal_prompt,
+            "internal_prompt_sha256": internal_sha,
+            "internal_prompt_path": internal_path,
+            "prompt": provider_prompt,
+            "prompt_sha256": adapter["provider_prompt_sha256"],
+            "prompt_length": adapter["provider_prompt_length"],
+            "file": str(provider_path.relative_to(projects.path(project_id))),
+            "path": str(provider_path.relative_to(projects.path(project_id))),
+            "prompt_source": "nano-banana-adapted",
+            "prompt_transport_policy": adapter["nano_banana_prompt_transport_policy"],
+        }
+    )
+    return result
+
+
+def _compile_prompt(project_id: str, stage: str) -> dict:
+    base = _compile_prompt_base(project_id, stage)
+    state = _read_project(project_id)
+    override = (state.get("prompt_overrides") or {}).get(stage)
+    if not isinstance(override, dict):
+        base["prompt_override_active"] = False
+        return base
+
+    base_sha = str(base.get("prompt_sha256") or "")
+    if str(override.get("base_provider_prompt_sha256") or "") != base_sha:
+        base["prompt_override_active"] = False
+        base["prompt_override_stale"] = True
+        return base
+
+    edited = str(override.get("prompt") or "").strip()
+    if not edited:
+        base["prompt_override_active"] = False
+        return base
+
+    output = dict(base)
+    output["prompt"] = edited
+    output["provider_prompt"] = edited
+    output["prompt_sha256"] = hashlib.sha256(edited.encode("utf-8")).hexdigest()
+    output["provider_prompt_sha256"] = output["prompt_sha256"]
+    output["prompt_length"] = len(edited)
+    output["provider_prompt_length"] = len(edited)
+    output["path"] = str(override.get("path") or base.get("path") or "")
+    output["file"] = output["path"]
+    output["prompt_source"] = "manual-provider-override"
+    output["prompt_override_active"] = True
+    output["prompt_override_stale"] = False
+    output["prompt_override_edited_at"] = override.get("edited_at")
+    return output
 
 
 def _relative_path(value: str | None, project_dir: Path) -> str | None:
@@ -178,6 +251,7 @@ def health() -> dict:
         "generation_mode": "background-job-polling",
         "environment_input": "approved-geometry-only",
         "outpaint_detection": "automatic-from-approved-geometry",
+        "nano_banana_prompt_adapter": getattr(ai_images, "nano_banana_prompt_adapter_version", None),
     }
 
 
@@ -206,6 +280,21 @@ def get_project(project_id: str) -> dict:
         raise HTTPException(404, "Проект не найден.")
 
 
+@app.delete("/api/projects/{project_id}")
+def delete_project(project_id: str) -> dict:
+    running = _job_snapshot(project_id)
+    if running.get("status") in {"queued", "processing"}:
+        raise HTTPException(409, "Нельзя удалить проект во время активной генерации. Дождитесь её завершения.")
+    try:
+        state = _read_project(project_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "Проект не найден.")
+    name = state.get("name") or project_id
+    projects.delete(project_id)
+    _clear_job(project_id)
+    return {"deleted": True, "project_id": project_id, "name": name}
+
+
 @app.get("/api/projects/{project_id}/history")
 def get_history(project_id: str, limit: int = 100) -> list[dict]:
     return projects.history(project_id, limit)
@@ -225,6 +314,7 @@ def get_diagnostics(project_id: str) -> dict:
         ),
         "generation": state.get("generation"),
         "generation_job": _job_snapshot(project_id),
+        "prompt_overrides": state.get("prompt_overrides", {}),
         "quality": state.get("quality", {}),
         "events": projects.history(project_id, 30),
     }
@@ -265,6 +355,7 @@ async def upload_source(project_id: str, file: UploadFile = File(...)) -> dict:
         state.pop("geometry", None)
         state.pop("generation_input", None)
         state.pop("generation", None)
+        state.pop("prompt_overrides", None)
         projects.write(project_id, state)
         projects.record(
             project_id,
@@ -318,6 +409,7 @@ def apply_geometry_grid(project_id: str, quad_json: str = Form(...)) -> dict:
     state["active_stage"] = "geometry"
     state.pop("generation_input", None)
     state.pop("generation", None)
+    state.pop("prompt_overrides", None)
     projects.write(project_id, state)
     projects.record(project_id, "GeometryGridApplied", state["geometry"])
     return _client_state(_read_project(project_id))
@@ -421,6 +513,10 @@ def _run_environment_generation(project_id: str, job_id: str) -> None:
         prepared["automatic_outpaint"] = {
             key: value for key, value in plan.items() if key != "path"
         }
+        prepared["internal_prompt_path"] = compiled.get("internal_prompt_path")
+        prepared["provider_prompt_path"] = compiled.get("path")
+        prepared["prompt_source"] = compiled.get("prompt_source")
+        prepared["prompt_override_active"] = bool(compiled.get("prompt_override_active"))
         prepared_state = _transport_for_state(prepared, project_dir)
 
         state = _read_project(project_id)
@@ -428,6 +524,9 @@ def _run_environment_generation(project_id: str, job_id: str) -> None:
         state["generation"].update(
             {
                 "prompt": compiled.get("path"),
+                "internal_prompt": compiled.get("internal_prompt_path"),
+                "prompt_source": compiled.get("prompt_source"),
+                "prompt_override_active": bool(compiled.get("prompt_override_active")),
                 "request_body_bytes": prepared_state.get("request_body_bytes"),
                 "outpaint": prepared_state.get("automatic_outpaint"),
             }
@@ -442,6 +541,7 @@ def _run_environment_generation(project_id: str, job_id: str) -> None:
                 "transport": f"{prepared_state.get('transport_width')}x{prepared_state.get('transport_height')}",
                 "request_body_bytes": prepared_state.get("request_body_bytes"),
                 "resized_for_provider": prepared_state.get("resized_for_provider"),
+                "prompt_source": compiled.get("prompt_source"),
                 "outpaint_detection": "automatic-from-approved-geometry",
                 "missing_pixels": plan.get("missing_pixels"),
                 "region_count": plan.get("region_count"),
@@ -480,6 +580,10 @@ def _run_environment_generation(project_id: str, job_id: str) -> None:
             final_transport["automatic_outpaint"] = {
                 key: value for key, value in plan.items() if key != "path"
             }
+            final_transport["internal_prompt_path"] = compiled.get("internal_prompt_path")
+            final_transport["provider_prompt_path"] = compiled.get("path")
+            final_transport["prompt_source"] = compiled.get("prompt_source")
+            final_transport["prompt_override_active"] = bool(compiled.get("prompt_override_active"))
 
         completed_at = _utc_now()
         state = _read_project(project_id)
@@ -501,6 +605,10 @@ def _run_environment_generation(project_id: str, job_id: str) -> None:
             "started_at": started_at,
             "completed_at": completed_at,
             "input": "approved-geometry-only",
+            "prompt": compiled.get("path"),
+            "internal_prompt": compiled.get("internal_prompt_path"),
+            "prompt_source": compiled.get("prompt_source"),
+            "prompt_override_active": bool(compiled.get("prompt_override_active")),
             "outpaint": {
                 key: value for key, value in plan.items() if key != "path"
             },
@@ -521,7 +629,11 @@ def _run_environment_generation(project_id: str, job_id: str) -> None:
         )
     except Exception as exc:
         details = exc.details if isinstance(exc, AIEngineError) else {}
-        state = _read_project(project_id)
+        try:
+            state = _read_project(project_id)
+        except FileNotFoundError:
+            _clear_job(project_id)
+            return
         transport = details.get("transport") if isinstance(details, dict) else None
         if transport:
             state["generation_input"] = _transport_for_state(transport, project_dir)
@@ -723,6 +835,8 @@ def set_stage_status(project_id: str, stage: str, status: str = Form(...)) -> di
 
 @app.get("/api/projects/{project_id}/prompt/{stage}")
 def compile_prompt(project_id: str, stage: str) -> dict:
+    if stage not in {"geometry", "environment", "branding"}:
+        raise HTTPException(422, "Неподдерживаемый этап.")
     result = _compile_prompt(project_id, stage)
     state = _read_project(project_id)
     comments = [
@@ -735,9 +849,74 @@ def compile_prompt(project_id: str, stage: str) -> dict:
             "stage": stage,
             "comment_count": len(comments),
             "path": result.get("path"),
+            "prompt_source": result.get("prompt_source"),
+            "prompt_override_active": bool(result.get("prompt_override_active")),
         },
     )
     return result
+
+
+@app.post("/api/projects/{project_id}/prompt/{stage}/edit")
+def edit_compiled_prompt(project_id: str, stage: str, prompt: str = Form(...)) -> dict:
+    if stage not in {"geometry", "environment", "branding"}:
+        raise HTTPException(422, "Неподдерживаемый этап.")
+    clean = prompt.strip()
+    if len(clean) < 10:
+        raise HTTPException(422, "Отредактированный prompt слишком короткий.")
+    base = _compile_prompt_base(project_id, stage)
+    project_dir = projects.path(project_id)
+    folder = project_dir / "prompts" / stage
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    path = folder / f"edited_provider_{stamp}.txt"
+    path.write_text(clean + "\n", "utf-8")
+
+    state = _read_project(project_id)
+    override = {
+        "prompt": clean,
+        "path": str(path.relative_to(project_dir)),
+        "base_provider_prompt_sha256": str(base.get("prompt_sha256") or ""),
+        "edited_prompt_sha256": hashlib.sha256(clean.encode("utf-8")).hexdigest(),
+        "edited_at": _utc_now(),
+        "stage": stage,
+    }
+    state.setdefault("prompt_overrides", {})[stage] = override
+    projects.write(project_id, state)
+    projects.record(
+        project_id,
+        "PromptEdited",
+        {
+            "stage": stage,
+            "path": override["path"],
+            "base_provider_prompt_sha256": override["base_provider_prompt_sha256"],
+            "edited_prompt_sha256": override["edited_prompt_sha256"],
+        },
+    )
+    result = dict(base)
+    result["prompt"] = clean
+    result["provider_prompt"] = clean
+    result["prompt_sha256"] = override["edited_prompt_sha256"]
+    result["provider_prompt_sha256"] = override["edited_prompt_sha256"]
+    result["prompt_length"] = len(clean)
+    result["provider_prompt_length"] = len(clean)
+    result["path"] = override["path"]
+    result["file"] = override["path"]
+    result["prompt_source"] = "manual-provider-override"
+    result["prompt_override_active"] = True
+    return result
+
+
+@app.delete("/api/projects/{project_id}/prompt/{stage}/edit")
+def reset_compiled_prompt(project_id: str, stage: str) -> dict:
+    if stage not in {"geometry", "environment", "branding"}:
+        raise HTTPException(422, "Неподдерживаемый этап.")
+    state = _read_project(project_id)
+    overrides = state.setdefault("prompt_overrides", {})
+    removed = overrides.pop(stage, None)
+    projects.write(project_id, state)
+    if removed:
+        projects.record(project_id, "PromptEditReset", {"stage": stage})
+    return _compile_prompt_base(project_id, stage)
 
 
 @app.get("/api/projects/{project_id}/assets/{asset_key}")
