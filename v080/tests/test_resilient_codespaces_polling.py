@@ -88,6 +88,16 @@ def test_pre_generation_prompt_is_always_visible_and_editable_in_console():
     assert "/prompt/environment/edit" in patch
 
 
+def test_prompt_editor_does_not_reload_on_generation_polling():
+    patch = (ROOT / "ui_single_window" / "prompt-workspace-console-patch.js").read_text("utf-8")
+    assert "loadedPromptKey" in patch
+    assert "loadedPromptKey === key" in patch
+    assert "allowPromptLoad = true" in patch
+    assert "allowPromptLoad: false" in patch
+    assert "Polling updates project/process state, but must never reload the prompt editor." in patch
+    assert "!url.includes('/assets/') && !isPromptRequest" in patch
+
+
 def test_quality_build_keeps_resilient_generation_bridge_and_workspace_controls():
     build = (ROOT / "build.sh").read_text("utf-8")
     start = (ROOT / "start.sh").read_text("utf-8")
