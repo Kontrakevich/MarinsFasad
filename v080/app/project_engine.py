@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -69,6 +70,13 @@ class ProjectEngine:
                 temporary.replace(path)
             finally:
                 temporary.unlink(missing_ok=True)
+
+    def delete(self, project_id: str) -> None:
+        with self._lock:
+            project = self.path(project_id)
+            if not (project / "project.json").is_file():
+                raise FileNotFoundError(project_id)
+            shutil.rmtree(project)
 
     def record(self, project_id: str, event_type: str, payload: dict | None = None, *, actor: str = "user") -> dict:
         with self._lock:
