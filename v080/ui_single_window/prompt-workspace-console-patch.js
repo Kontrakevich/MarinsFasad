@@ -6,6 +6,10 @@
   let activeProject = null;
   let loadSerial = 0;
   let bypassGenerateIntercept = false;
+  let loadedPromptKey = '';
+  let loadingPrompt = false;
+  let savingPrompt = false;
+  let rebuildingPrompt = false;
 
   function projectIdFromUrl(value) {
     const url = typeof value === 'string' ? value : (value?.url || '');
@@ -17,6 +21,12 @@
     return activeProject?.active_stage
       || document.querySelector('#pipeline button.is-active')?.dataset?.stage
       || 'environment';
+  }
+
+  function promptKey() {
+    return activeProjectId && currentStage() === 'environment'
+      ? `${activeProjectId}:environment`
+      : '';
   }
 
   async function api(url, options = {}) {
@@ -55,7 +65,7 @@
 
   function markDirty() {
     const {textarea} = nodes();
-    if (!textarea || textarea.disabled) return;
+    if (!textarea || textarea.disabled || loadingPrompt || savingPrompt || rebuildingPrompt) return;
     textarea.dataset.dirty = 'true';
     setStatus('НЕСОХРАНЁННЫЕ ИЗМЕНЕНИЯ · будут сохранены перед генерацией', 'dirty');
   }
@@ -68,7 +78,10 @@
     installWorkspace();
     const {textarea, source} = nodes();
     if (!textarea) return null;
-    if (!activeProjectId || currentStage() !== 'environment') {
+
+    const key = promptKey();
+    if (!key) {
+      loadedPromptKey = '';
       textarea.value = '';
       textarea.disabled = true;
       textarea.placeholder = 'Редактор станет доступен на этапе ОКРУЖЕНИЕ.';
@@ -76,18 +89,25 @@
       setStatus('PROMPT НЕДОСТУПЕН НА ТЕКУЩЕМ ЭТАПЕ', 'idle');
       return null;
     }
-    if (!force && isDirty()) return null;
+
+    if (!force && (isDirty() || loadingPrompt || savingPrompt || rebuildingPrompt || loadedPromptKey === key)) {
+      return null;
+    }
 
     const serial = ++loadSerial;
+    loadingPrompt = true;
     textarea.disabled = true;
     setStatus('ЗАГРУЗКА ФИНАЛЬНОГО PROMPT…', 'loading');
+
     try {
       const payload = await api(`/api/projects/${encodeURIComponent(activeProjectId)}/prompt/environment`, {cache: 'no-store'});
       if (serial !== loadSerial) return null;
+
       textarea.value = payload?.prompt || '';
       textarea.disabled = false;
       textarea.dataset.dirty = 'false';
       textarea.dataset.loadedProject = activeProjectId;
+      loadedPromptKey = key;
       textarea.placeholder = 'Отредактируйте финальный текст, который будет отправлен Nano Banana.';
       if (source) source.textContent = String(payload?.prompt_source || 'compiled').toUpperCase();
       setStatus(
@@ -102,6 +122,8 @@
       textarea.disabled = false;
       setStatus(`ОШИБКА PROMPT: ${error.message}`, 'error');
       return null;
+    } finally {
+      if (serial === loadSerial) loadingPrompt = false;
     }
   }
 
@@ -113,35 +135,47 @@
     const prompt = textarea.value.trim();
     if (!prompt) throw new Error('Prompt не может быть пустым.');
 
+    savingPrompt = true;
     setStatus('СОХРАНЕНИЕ…', 'loading');
-    const form = new FormData();
-    form.append('prompt', prompt);
-    const saved = await api(`/api/projects/${encodeURIComponent(activeProjectId)}/prompt/environment/edit`, {
-      method: 'POST',
-      body: form,
-    });
-    textarea.value = saved?.prompt || prompt;
-    textarea.dataset.dirty = 'false';
-    if (source) source.textContent = 'MANUAL OVERRIDE';
-    setStatus('СОХРАНЕНО · этот текст будет отправлен Nano Banana', 'saved');
-    return saved;
+    try {
+      const form = new FormData();
+      form.append('prompt', prompt);
+      const saved = await api(`/api/projects/${encodeURIComponent(activeProjectId)}/prompt/environment/edit`, {
+        method: 'POST',
+        body: form,
+      });
+      textarea.value = saved?.prompt || prompt;
+      textarea.dataset.dirty = 'false';
+      textarea.dataset.loadedProject = activeProjectId;
+      loadedPromptKey = promptKey();
+      if (source) source.textContent = 'MANUAL OVERRIDE';
+      setStatus('СОХРАНЕНО · этот текст будет отправлен Nano Banana', 'saved');
+      return saved;
+    } finally {
+      savingPrompt = false;
+    }
   }
 
   async function rebuildPrompt() {
     if (!activeProjectId) throw new Error('Проект не выбран.');
+    rebuildingPrompt = true;
     setStatus('ПЕРЕСБОРКА…', 'loading');
-    await api(`/api/projects/${encodeURIComponent(activeProjectId)}/prompt/environment/edit`, {method: 'DELETE'});
-    const {textarea} = nodes();
-    if (textarea) textarea.dataset.dirty = 'false';
+    try {
+      await api(`/api/projects/${encodeURIComponent(activeProjectId)}/prompt/environment/edit`, {method: 'DELETE'});
+      const {textarea} = nodes();
+      if (textarea) textarea.dataset.dirty = 'false';
+      loadedPromptKey = '';
+    } finally {
+      rebuildingPrompt = false;
+    }
     return loadPrompt({force: true});
   }
 
   async function saveIfDirtyBeforeGeneration() {
     if (currentStage() !== 'environment') return;
     const {textarea} = nodes();
-    if (!textarea || textarea.disabled) {
+    if (!textarea || textarea.disabled || loadedPromptKey !== promptKey()) {
       await loadPrompt({force: true});
-      return;
     }
     if (isDirty()) await savePrompt();
   }
@@ -221,21 +255,33 @@
     textarea?.addEventListener('input', markDirty);
     save?.addEventListener('click', () => savePrompt().catch(error => setStatus(`ОШИБКА: ${error.message}`, 'error')));
     rebuild?.addEventListener('click', () => rebuildPrompt().catch(error => setStatus(`ОШИБКА: ${error.message}`, 'error')));
-    refresh?.addEventListener('click', () => loadPrompt({force: true}));
+    refresh?.addEventListener('click', () => {
+      if (isDirty() && !window.confirm('Отменить несохранённые изменения и загрузить сохранённый prompt?')) return;
+      loadPrompt({force: true});
+    });
     installGenerateGuard();
   }
 
-  function acceptProject(project) {
+  function acceptProject(project, {allowPromptLoad = true} = {}) {
     if (!project?.id) return;
-    const changed = project.id !== activeProjectId;
+
+    const previousProjectId = activeProjectId;
+    const previousStage = currentStage();
     activeProjectId = project.id;
     activeProject = project;
+    const nextStage = currentStage();
+
     installWorkspace();
     installGenerateGuard();
-    const {textarea} = nodes();
-    const wrongProject = textarea?.dataset?.loadedProject !== activeProjectId;
-    if (changed || wrongProject || (!isDirty() && currentStage() === 'environment')) {
-      loadPrompt({force: changed || wrongProject});
+
+    if (!allowPromptLoad) return;
+
+    const projectChanged = previousProjectId !== activeProjectId;
+    const enteredEnvironment = previousStage !== 'environment' && nextStage === 'environment';
+    const keyChanged = loadedPromptKey !== promptKey();
+
+    if ((projectChanged || enteredEnvironment || keyChanged) && !isDirty() && !loadingPrompt && !savingPrompt && !rebuildingPrompt) {
+      loadPrompt({force: projectChanged || enteredEnvironment});
     }
   }
 
@@ -243,10 +289,13 @@
     installWorkspace();
     installGenerateGuard();
     const id = projectIdFromUrl(input);
-    if (id) activeProjectId = id;
+    if (id && !activeProjectId) activeProjectId = id;
+
     const response = await nativeFetch(input, init);
     const url = typeof input === 'string' ? input : (input?.url || '');
-    if (!url.includes('/assets/')) {
+    const isPromptRequest = /\/prompt\/environment(?:\/edit)?(?:[/?]|$)/.test(url);
+
+    if (!url.includes('/assets/') && !isPromptRequest) {
       try {
         const payload = await response.clone().json();
         if (payload?.id && payload?.pipeline) acceptProject(payload);
@@ -257,7 +306,8 @@
   };
 
   window.addEventListener('marins-generation-status', event => {
-    if (event.detail?.project) acceptProject(event.detail.project);
+    // Polling updates project/process state, but must never reload the prompt editor.
+    if (event.detail?.project) acceptProject(event.detail.project, {allowPromptLoad: false});
   });
 
   if (document.readyState === 'loading') {
