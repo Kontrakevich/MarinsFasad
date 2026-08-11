@@ -33,6 +33,26 @@ def test_router_keeps_pure_missing_region_request_as_outpaint() -> None:
     assert route["signals"] == []
 
 
+def test_router_keeps_local_lighting_and_wetness_as_outpaint_context() -> None:
+    route = IntentSkillRouter.route(
+        "outpaint",
+        ["Продолжить мокрый асфальт и вечернее освещение в отсутствующих областях."],
+    )
+    assert route["auto_routed"] is False
+    assert route["effective_mode"] == "outpaint"
+    assert "scene_wide_relight_or_weather" not in route["signals"]
+
+
+def test_router_promotes_explicit_global_relight_from_outpaint_to_hybrid() -> None:
+    route = IntentSkillRouter.route(
+        "outpaint",
+        ["Сделай вечернее освещение по всему кадру и дорисуй отсутствующие углы."],
+    )
+    assert route["auto_routed"] is True
+    assert route["effective_mode"] == "hybrid"
+    assert "scene_wide_relight_or_weather" in route["signals"]
+
+
 def test_compiled_prompt_uses_effective_hybrid_for_conflicting_outpaint_intent() -> None:
     created = client.post("/api/projects", data={"name": "Intent router conflict"})
     assert created.status_code == 200
