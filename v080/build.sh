@@ -26,6 +26,7 @@ grep -q 'save-prompt-edit' "$ROOT/app/web/app-v080.js"
 grep -q 'delete-project' "$ROOT/app/web/app-v080.js"
 grep -q 'nano_banana_prompt_adapter' "$ROOT/app/__init__.py"
 grep -q 'NANO BANANA EXECUTION PROMPT v1' "$ROOT/app/nano_banana_prompt_adapter.py"
+grep -q 'nano_banana_prompt_adapter_version = "1.0.1"' "$ROOT/app/nano_banana_prompt_adapter.py"
 grep -q 'manual-provider-override' "$ROOT/app/main.py"
 grep -q '@app.delete("/api/projects/{project_id}")' "$ROOT/app/main.py"
 grep -q 'transport_engine_version = "3.4.0"' "$ROOT/app/skill_engine.py"
@@ -60,8 +61,9 @@ assert engine.available_generation_modes == ("hybrid", "relight", "edit", "outpa
 assert engine.available_generation_qualities == ("draft", "standard", "high", "max")
 assert engine.default_generation_quality == "high"
 assert engine.default_generation_mode == "hybrid"
-assert engine.nano_banana_prompt_adapter_version == "1.0.0"
+assert engine.nano_banana_prompt_adapter_version == "1.0.1"
 assert engine.adapt_execution_prompt("NANO BANANA EXECUTION PROMPT v1\nmanual") == "NANO BANANA EXECUTION PROMPT v1\nmanual"
+assert engine.adapt_execution_prompt("manual provider prompt") == "manual provider prompt"
 assert engine.environment_input_policy == "approved-geometry-only"
 assert engine.outpaint_detection_policy == "automatic-from-approved-geometry-transparency"
 assert engine.provider_input_policy == "single-approved-geometry-reference"
@@ -78,7 +80,7 @@ assert System1Intelligence.version == "1.0.0"
 assert hasattr(ProjectEngine, "_system1_original_read")
 print(f"OpenCV {cv2.__version__} and NumPy {numpy.__version__} verified")
 print("Skill Engine 3.4.0 verified")
-print("Nano Banana Prompt Adapter 1.0.0 verified")
+print("Nano Banana Prompt Adapter 1.0.1 verified")
 print("Editable provider prompt + project deletion API verified")
 print("System №1 Intelligence 1.0.0 verified")
 PY
