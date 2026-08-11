@@ -38,7 +38,7 @@ def _inject_router_section(prompt: str, route: dict) -> str:
 def routed_compile(self: PromptEngine, context: PromptContext, project_dir: Path) -> dict:
     original = self._system1_intent_original_compile
     if str(context.stage or "").lower() != "environment":
-        return original(self, context, project_dir)
+        return original(context, project_dir)
 
     requested_mode = self._mode_from_comments(context.comments, context.generation_mode)
     operator_comments = self._operator_comments(context.comments)
@@ -57,13 +57,12 @@ def routed_compile(self: PromptEngine, context: PromptContext, project_dir: Path
         comments=routed_comments,
         generation_mode=route["effective_mode"],
     )
-    result = original(self, routed_context, project_dir)
+    result = original(routed_context, project_dir)
 
     prompt = _inject_router_section(str(result.get("prompt") or ""), route)
     if prompt != result.get("prompt"):
-        prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         result["prompt"] = prompt
-        result["prompt_sha256"] = prompt_sha256
+        result["prompt_sha256"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         result["prompt_length"] = len(prompt)
         path = project_dir / str(result["path"])
         path.write_text(prompt + "\n", "utf-8")
