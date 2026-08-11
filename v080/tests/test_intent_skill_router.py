@@ -79,9 +79,17 @@ def test_compiled_prompt_uses_effective_hybrid_for_conflicting_outpaint_intent()
     assert payload["effective_generation_mode"] == "hybrid"
     assert payload["generation_mode"] == "hybrid"
     assert payload["intent_router"]["auto_routed"] is True
+
+    # Nano Banana receives the concise execution prompt: only the effective
+    # mode belongs in provider text. Router rationale remains in the internal
+    # audit/System №1 contract and structured metadata.
     assert "GENERATION MODE\nHYBRID" in payload["prompt"]
-    assert "Requested skill: OUTPAINT" in payload["prompt"]
-    assert "Effective skill: HYBRID" in payload["prompt"]
+    assert "Requested skill: OUTPAINT" not in payload["prompt"]
+    assert "Effective skill: HYBRID" not in payload["prompt"]
+    assert "Requested skill: OUTPAINT" in payload["internal_prompt"]
+    assert "Effective skill: HYBRID" in payload["internal_prompt"]
+    assert payload["intent_router"]["requested_mode"] == "outpaint"
+    assert payload["intent_router"]["effective_mode"] == "hybrid"
     assert "Удали столбы и провода." in payload["prompt"]
     assert "__MARINS_GENERATION_MODE__" not in payload["prompt"]
 
