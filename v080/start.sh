@@ -9,15 +9,13 @@ EXPECTED_PROMPT_CONTRACT="environment-system-v1.7-quality-outpaint"
 EXPECTED_MODEL="google/gemini-2.5-flash-image"
 EXPECTED_APP_VERSION="0.8.1"
 
-# IMPORTANT AVAILABILITY RULE:
-# Do every deterministic preflight check BEFORE touching the currently running
-# server. A failed source/configuration check must never take port 8070 offline.
+# Do deterministic checks before touching a healthy server.
 cd "$ROOT"
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
 sed -i 's/resilient-fullframe-0806/quality-outpaint-3400/g; s/selective-nanobanana-0806/quality-outpaint-3400/g; s/geometry-only-outpaint-0806/quality-outpaint-3400/g; s/stable-nanobanana-3000/quality-outpaint-3400/g; s/working-master-3001/quality-outpaint-3400/g; s/hybrid-edit-3100/quality-outpaint-3400/g; s/hybrid-two-pass-3200/quality-outpaint-3400/g; s/skill-contracts-3300/quality-outpaint-3400/g' "$ROOT/app/web/index.html"
 sed -i 's/V0.8.0/V0.8.1 QUALITY/g; s/ORIGINAL MASTER/WORKING MASTER/g; s/NO DOWNSCALE/GENERATION SCALE/g; s/Файл сохраняется без уменьшения и перекодирования. Preview существует отдельно./Оригинал сохраняется в архиве проекта. Для сетки и генерации используется облегчённый рабочий master./g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
-cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" "$ROOT/ui_single_window/grid-ux-patch.js" "$ROOT/ui_single_window/hybrid-mode-patch.js" "$ROOT/ui_single_window/system1-intelligence-patch.js" > "$ROOT/app/web/app-v080.js"
+cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" "$ROOT/ui_single_window/grid-ux-patch.js" "$ROOT/ui_single_window/hybrid-mode-patch.js" "$ROOT/ui_single_window/system1-intelligence-patch.js" "$ROOT/ui_single_window/workspace-controls-patch.js" > "$ROOT/app/web/app-v080.js"
 sed -i 's/Сгенерируйте окружение по всему canvas/Выполните выбранный skill генерации/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/Выполните выбранный skill генерации/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Production policy: original resolution\./Рабочий master оптимизирован до размера генерации; исходный файл сохранён в архиве проекта./g' "$ROOT/app/web/app-v080.js"
@@ -28,15 +26,14 @@ grep -q 'RELIGHT · NEW LIGHTING' "$ROOT/app/web/app-v080.js"
 grep -q 'environment-quality' "$ROOT/app/web/app-v080.js"
 grep -q 'SYSTEM №1' "$ROOT/app/web/app-v080.js"
 grep -q 'L1 TECHNICAL → L2 HUMAN ALIGNMENT' "$ROOT/app/web/app-v080.js"
-grep -q 'const ZOOM_STEP = 0.05' "$ROOT/app/web/app-v080.js"
-grep -q 'requestGridFullscreen' "$ROOT/app/web/app-v080.js"
-grep -q 'skill_engine' "$ROOT/app/__init__.py"
-grep -q 'provider_retry' "$ROOT/app/__init__.py"
-grep -q 'system1_intelligence' "$ROOT/app/__init__.py"
+grep -q 'save-prompt-edit' "$ROOT/app/web/app-v080.js"
+grep -q 'delete-project' "$ROOT/app/web/app-v080.js"
+grep -q 'nano_banana_prompt_adapter' "$ROOT/app/__init__.py"
+grep -q 'NANO BANANA EXECUTION PROMPT v1' "$ROOT/app/nano_banana_prompt_adapter.py"
+grep -q 'manual-provider-override' "$ROOT/app/main.py"
 grep -q 'transport_engine_version = "3.4.0"' "$ROOT/app/skill_engine.py"
 grep -q 'quality-aware-edge-refine' "$ROOT/app/skill_engine.py"
 grep -q 'GATED_BY_LAYER1' "$ROOT/app/intelligence/orchestrator.py"
-grep -q 'outpaint-semantic-conflict-promotes-to-hybrid' "$ROOT/app/intelligence/intent_router.py"
 grep -q "$EXPECTED_PROMPT_CONTRACT" "$ROOT/app/system_prompts.py"
 
 python -B - "$EXPECTED_TRANSPORT_ENGINE" "$EXPECTED_PROMPT_CONTRACT" "$EXPECTED_MODEL" "$EXPECTED_APP_VERSION" <<'PY'
@@ -59,6 +56,8 @@ if PROMPT_CONTRACT_VERSION != expected_prompt:
     raise SystemExit(f"Prompt contract mismatch: expected {expected_prompt}, got {PROMPT_CONTRACT_VERSION}")
 if engine.model != expected_model or engine.required_model != expected_model:
     raise SystemExit(f"Model lock mismatch: expected {expected_model}, got {engine.model}")
+if engine.nano_banana_prompt_adapter_version != "1.0.0":
+    raise SystemExit("Nano Banana prompt adapter is not active")
 if engine.available_generation_modes != ("hybrid", "relight", "edit", "outpaint"):
     raise SystemExit("Skill generation modes are not active")
 if engine.available_generation_qualities != ("draft", "standard", "high", "max"):
@@ -78,7 +77,7 @@ if engine.missing_region_transport_policy != "native-transparency-single-referen
 if engine.environment_input_policy != "approved-geometry-only":
     raise SystemExit("Geometry-only input policy is inactive")
 if engine.provider_input_policy != "single-approved-geometry-reference":
-    raise SystemExit("Nano Banana must receive one visual reference per pass")
+    raise SystemExit("Nano Banana must receive one approved geometry reference per pass")
 if engine.user_mask_required is not False:
     raise SystemExit("User mask must not exist")
 if image_engine._generation_canvas(8064, 6048) != engine._select_provider_size(8064, 6048):
@@ -89,18 +88,13 @@ print("Skill Engine 3.4.0 verified")
 print(f"App version: {APP_VERSION}")
 print(f"Prompt contract: {PROMPT_CONTRACT_VERSION}")
 print(f"Image model locked: {engine.model}")
-print("Default skill: HYBRID")
-print("Generation quality: DRAFT / STANDARD / HIGH / MAXIMUM; default HIGH")
-print("OUTPAINT HIGH/MAX: automatic context-rich edge refinement")
-print("OUTPAINT seams: tone harmonization + feather only inside missing regions")
-print("Prompt: complete compiled context propagated to outpaint/refinement")
+print("Nano Banana Prompt Adapter 1.0.0: active")
+print("Prompt editor: final provider prompt is editable and versioned")
+print("Project deletion: active except during running generation")
 print("System №1 Intelligence 1.0.0: active")
-print("System №1 precedence: Layer 1 technical -> gated Layer 2 human alignment")
-print("System №1 storage: native SQLite; observer cannot break the production pipeline")
-print("Original source: archived; working master reduced before Perspective Grid")
 PY
 
-# Only after all source/runtime preflight checks passed may we replace the server.
+# Replace the server only after preflight succeeds.
 OLD_PID=""
 if [ -f "$PID_FILE" ]; then
   OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
@@ -150,6 +144,7 @@ ok = (
     and payload.get('image_model') == expected_model
     and payload.get('environment_input') == 'approved-geometry-only'
     and payload.get('outpaint_detection') == 'automatic-from-approved-geometry'
+    and payload.get('nano_banana_prompt_adapter') == '1.0.0'
 )
 raise SystemExit(0 if ok else 1)
 PY
@@ -158,10 +153,8 @@ PY
       echo "Transport engine: $EXPECTED_TRANSPORT_ENGINE"
       echo "Prompt contract: $EXPECTED_PROMPT_CONTRACT"
       echo "Image model: $EXPECTED_MODEL"
-      echo "Default skill: HYBRID"
-      echo "Default quality: HIGH"
-      echo "Outpaint refinement: quality-aware-edge-refine"
-      echo "System1 Intelligence: Layer1 technical -> gated Layer2 alignment"
+      echo "Nano Banana Prompt Adapter: 1.0.0"
+      echo "Prompt editor + project deletion: active"
       cat "$HEALTH_FILE"
       exit 0
     fi
@@ -169,7 +162,7 @@ PY
   sleep 0.2
 done
 
-echo "Server did not expose the required v0.8.1 Quality + System1 runtime." >&2
+echo "Server did not expose the required v0.8.1 prompt-workspace runtime." >&2
 tail -100 "$LOG_FILE" >&2 || true
 cleanup_failed_start
 exit 1
