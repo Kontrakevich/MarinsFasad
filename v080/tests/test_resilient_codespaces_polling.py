@@ -23,10 +23,10 @@ def test_generation_status_404_recovers_from_persisted_project_without_duplicate
     assert "return pollStatus(statusUrl, details.projectId" in bridge
 
 
-def test_frontend_cache_key_changes_with_status_recovery_bridge():
+def test_frontend_cache_key_changes_with_intent_router_ui():
     index = (ROOT / "ui_single_window" / "index.html").read_text("utf-8")
-    assert "system1-status-recovery-3410" in index
-    assert "app-v080.js?v=hybrid-two-pass-3200-system1-status-recovery-3410" in index
+    assert "system1-intent-router-3420" in index
+    assert "app-v080.js?v=hybrid-two-pass-3200-system1-intent-router-3420" in index
 
 
 def test_quality_build_keeps_resilient_generation_bridge():
