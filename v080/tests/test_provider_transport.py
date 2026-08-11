@@ -4,7 +4,7 @@ from PIL import Image
 
 from app.ai_engine import OpenRouterImageEngine
 from app.prompt_engine import GENERATION_MODE_MARKER, GENERATION_QUALITY_MARKER
-from app.system_prompts import ENVIRONMENT_SYSTEM_PROMPT, PROMPT_CONTRACT_VERSION
+from app.system_prompts import PROMPT_CONTRACT_VERSION
 
 
 NANO_BANANA = "google/gemini-2.5-flash-image"
@@ -52,6 +52,7 @@ def test_nano_banana_and_skill_contract_are_hard_locked(monkeypatch):
     assert engine.internal_outpaint_tiles_allowed is False
     assert engine.missing_region_transport_policy == "native-transparency-single-reference"
     assert engine.outpaint_repair_mode == "hybrid-second-pass"
+    assert engine.nano_banana_prompt_adapter_version == "1.0.1"
 
 
 def test_provider_size_selection_matches_master_orientation():
@@ -141,21 +142,20 @@ def test_relight_mode_is_recognised_as_full_frame_semantic_skill():
     assert "relight" in engine.available_generation_modes
 
 
-def test_payload_contains_prompt_and_only_geometry_reference(tmp_path):
+def test_simple_or_manually_edited_prompt_is_sent_verbatim(tmp_path):
     geometry = tmp_path / "approved-geometry.png"
     make_geometry(geometry, (320, 240))
+    prompt = "Operator requirement: remove the poles and make the weather cloudy."
 
     payload = OpenRouterImageEngine()._build_payload(
-        prompt="Operator requirement: remove the poles and make the weather cloudy.",
+        prompt=prompt,
         geometry_image=geometry,
         outpaint_mask=tmp_path / "ignored.png",
         provider_size=(1536, 1024),
     )
 
     assert payload["model"] == NANO_BANANA
-    assert ENVIRONMENT_SYSTEM_PROMPT in payload["prompt"]
-    assert PROMPT_CONTRACT_VERSION in payload["prompt"]
-    assert "remove the poles" in payload["prompt"]
+    assert payload["prompt"] == prompt
     assert len(payload["input_references"]) == 1
     assert payload["input_references"][0]["image_url"]["url"].startswith("data:image/")
 
