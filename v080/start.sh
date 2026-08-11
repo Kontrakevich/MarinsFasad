@@ -9,20 +9,9 @@ EXPECTED_PROMPT_CONTRACT="environment-system-v1.7-quality-outpaint"
 EXPECTED_MODEL="google/gemini-2.5-flash-image"
 EXPECTED_APP_VERSION="0.8.1"
 
-if [ -f "$PID_FILE" ]; then
-  OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
-  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
-    kill "$OLD_PID" 2>/dev/null || true
-    sleep 1
-  fi
-fi
-
-PORT_PIDS="$(fuser 8070/tcp 2>/dev/null || true)"
-if [ -n "$PORT_PIDS" ]; then
-  kill $PORT_PIDS 2>/dev/null || true
-  sleep 1
-fi
-
+# IMPORTANT AVAILABILITY RULE:
+# Do every deterministic preflight check BEFORE touching the currently running
+# server. A failed source/configuration check must never take port 8070 offline.
 cd "$ROOT"
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
 sed -i 's/resilient-fullframe-0806/quality-outpaint-3400/g; s/selective-nanobanana-0806/quality-outpaint-3400/g; s/geometry-only-outpaint-0806/quality-outpaint-3400/g; s/stable-nanobanana-3000/quality-outpaint-3400/g; s/working-master-3001/quality-outpaint-3400/g; s/hybrid-edit-3100/quality-outpaint-3400/g; s/hybrid-two-pass-3200/quality-outpaint-3400/g; s/skill-contracts-3300/quality-outpaint-3400/g' "$ROOT/app/web/index.html"
@@ -42,10 +31,12 @@ grep -q 'L1 TECHNICAL → L2 HUMAN ALIGNMENT' "$ROOT/app/web/app-v080.js"
 grep -q 'const ZOOM_STEP = 0.05' "$ROOT/app/web/app-v080.js"
 grep -q 'requestGridFullscreen' "$ROOT/app/web/app-v080.js"
 grep -q 'skill_engine' "$ROOT/app/__init__.py"
+grep -q 'provider_retry' "$ROOT/app/__init__.py"
 grep -q 'system1_intelligence' "$ROOT/app/__init__.py"
 grep -q 'transport_engine_version = "3.4.0"' "$ROOT/app/skill_engine.py"
 grep -q 'quality-aware-edge-refine' "$ROOT/app/skill_engine.py"
 grep -q 'GATED_BY_LAYER1' "$ROOT/app/intelligence/orchestrator.py"
+grep -q 'outpaint-semantic-conflict-promotes-to-hybrid' "$ROOT/app/intelligence/intent_router.py"
 grep -q "$EXPECTED_PROMPT_CONTRACT" "$ROOT/app/system_prompts.py"
 
 python -B - "$EXPECTED_TRANSPORT_ENGINE" "$EXPECTED_PROMPT_CONTRACT" "$EXPECTED_MODEL" "$EXPECTED_APP_VERSION" <<'PY'
@@ -109,6 +100,25 @@ print("System №1 storage: native SQLite; observer cannot break the production 
 print("Original source: archived; working master reduced before Perspective Grid")
 PY
 
+# Only after all source/runtime preflight checks passed may we replace the server.
+OLD_PID=""
+if [ -f "$PID_FILE" ]; then
+  OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+fi
+if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+  kill "$OLD_PID" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    kill -0 "$OLD_PID" 2>/dev/null || break
+    sleep 0.1
+  done
+fi
+
+PORT_PIDS="$(fuser 8070/tcp 2>/dev/null || true)"
+if [ -n "$PORT_PIDS" ]; then
+  kill $PORT_PIDS 2>/dev/null || true
+  sleep 0.2
+fi
+
 : > "$LOG_FILE"
 PYTHONDONTWRITEBYTECODE=1 nohup setsid python -B -m uvicorn app.main:app --host 0.0.0.0 --port 8070 >"$LOG_FILE" 2>&1 </dev/null &
 NEW_PID=$!
@@ -116,12 +126,12 @@ echo "$NEW_PID" > "$PID_FILE"
 
 cleanup_failed_start() {
   kill "$NEW_PID" 2>/dev/null || true
-  sleep 1
+  sleep 0.2
   kill -9 "$NEW_PID" 2>/dev/null || true
   rm -f "$PID_FILE"
 }
 
-for _ in $(seq 1 30); do
+for _ in $(seq 1 50); do
   if ! kill -0 "$NEW_PID" 2>/dev/null; then
     echo "Marins Facade v0.8.1 Quality + System1 process exited during startup." >&2
     tail -100 "$LOG_FILE" >&2 || true
@@ -156,7 +166,7 @@ PY
       exit 0
     fi
   fi
-  sleep 1
+  sleep 0.2
 done
 
 echo "Server did not expose the required v0.8.1 Quality + System1 runtime." >&2
