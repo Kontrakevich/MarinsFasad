@@ -4,17 +4,17 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
-sed -i 's/prompt-workspace-3430/system1-command-console-3440/g; s/resilient-fullframe-0806/quality-outpaint-3400/g; s/selective-nanobanana-0806/quality-outpaint-3400/g; s/geometry-only-outpaint-0806/quality-outpaint-3400/g; s/stable-nanobanana-3000/quality-outpaint-3400/g; s/working-master-3001/quality-outpaint-3400/g; s/hybrid-edit-3100/quality-outpaint-3400/g; s/hybrid-two-pass-3200/quality-outpaint-3400/g; s/skill-contracts-3300/quality-outpaint-3400/g' "$ROOT/app/web/index.html"
+sed -i 's/prompt-workspace-3430/system1-console-all-3450/g; s/system1-command-console-3440/system1-console-all-3450/g; s/resilient-fullframe-0806/quality-outpaint-3400/g; s/selective-nanobanana-0806/quality-outpaint-3400/g; s/geometry-only-outpaint-0806/quality-outpaint-3400/g; s/stable-nanobanana-3000/quality-outpaint-3400/g; s/working-master-3001/quality-outpaint-3400/g; s/hybrid-edit-3100/quality-outpaint-3400/g; s/hybrid-two-pass-3200/quality-outpaint-3400/g; s/skill-contracts-3300/quality-outpaint-3400/g' "$ROOT/app/web/index.html"
 sed -i 's/V0.8.0/V0.8.1 QUALITY/g; s/ORIGINAL MASTER/WORKING MASTER/g; s/NO DOWNSCALE/GENERATION SCALE/g; s/Файл сохраняется без уменьшения и перекодирования. Preview существует отдельно./Оригинал сохраняется в архиве проекта. Для сетки и генерации используется облегчённый рабочий master./g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
-cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" "$ROOT/ui_single_window/grid-ux-patch.js" "$ROOT/ui_single_window/hybrid-mode-patch.js" "$ROOT/ui_single_window/system1-intelligence-patch.js" "$ROOT/ui_single_window/workspace-controls-patch.js" "$ROOT/ui_single_window/command-console-patch.js" > "$ROOT/app/web/app-v080.js"
+cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" "$ROOT/ui_single_window/grid-ux-patch.js" "$ROOT/ui_single_window/hybrid-mode-patch.js" "$ROOT/ui_single_window/system1-intelligence-patch.js" "$ROOT/ui_single_window/workspace-controls-patch.js" "$ROOT/ui_single_window/command-console-patch.js" "$ROOT/ui_single_window/lower-console-patch.js" "$ROOT/ui_single_window/minimum-font-patch.js" > "$ROOT/app/web/app-v080.js"
 sed -i 's/Сгенерируйте окружение по всему canvas/Выполните выбранный skill генерации/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Дорисуйте отсутствующее окружение и выполните точные изменения из промпта/Выполните выбранный skill генерации/g' "$ROOT/app/web/app-v080.js"
 sed -i 's/Production policy: original resolution\./Рабочий master оптимизирован до размера генерации; исходный файл сохранён в архиве проекта./g' "$ROOT/app/web/app-v080.js"
 sed -i 's/V0.8.0 HYBRID/V0.8.1 QUALITY/g; s/V0.8.1 HYBRID/V0.8.1 QUALITY/g; s/V0.8.1 SKILLS/V0.8.1 QUALITY/g' "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
 
-grep -q 'system1-command-console-3440' "$ROOT/app/web/index.html"
+grep -q 'system1-console-all-3450' "$ROOT/app/web/index.html"
 grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
 grep -q 'startDetachedPolling' "$ROOT/app/web/app-v080.js"
 grep -q 'projectSnapshotResponse' "$ROOT/app/web/app-v080.js"
@@ -27,6 +27,11 @@ grep -q 'SYSTEM №1' "$ROOT/app/web/app-v080.js"
 grep -q 'L1 TECHNICAL → L2 HUMAN ALIGNMENT' "$ROOT/app/web/app-v080.js"
 grep -q 'SYSTEM №1 READY' "$ROOT/app/web/app-v080.js"
 grep -q 'COMMAND CONSOLE' "$ROOT/app/web/app-v080.js"
+grep -q 'commandHistory' "$ROOT/app/web/app-v080.js"
+grep -q 'commandCandidates' "$ROOT/app/web/app-v080.js"
+grep -q 'commandEvents' "$ROOT/app/web/app-v080.js"
+grep -q '.bottom-pane{display:none!important}' "$ROOT/app/web/app-v080.js"
+grep -q 'const MIN_FONT_PT = 10' "$ROOT/app/web/app-v080.js"
 grep -q 'save-prompt-edit' "$ROOT/app/web/app-v080.js"
 grep -q 'delete-project' "$ROOT/app/web/app-v080.js"
 grep -q 'nano_banana_prompt_adapter' "$ROOT/app/__init__.py"
@@ -88,6 +93,8 @@ print("Skill Engine 3.4.0 verified")
 print("Nano Banana Prompt Adapter 1.0.1 verified")
 print("System №1 Command Console verified")
 print("Generation UI: background polling detached from button busy state")
+print("Lower workspace: HISTORY / CANDIDATES / EVENTS moved to console")
+print("Typography: minimum font size 10 pt enforced")
 print("Editable provider prompt + project deletion API verified")
 print("System №1 Intelligence 1.0.0 verified")
 PY
@@ -111,4 +118,4 @@ MARINS_DATA_ROOT="$ROOT/.test-data/projects" \
 python -m pytest -vv --timeout=60 --timeout-method=thread
 rm -rf .test-data
 
-echo "Marins Facade v0.8.1 System1 command-console build passed"
+echo "Marins Facade v0.8.1 System1 console-only workspace build passed"
