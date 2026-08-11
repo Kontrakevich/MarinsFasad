@@ -12,7 +12,7 @@ from app.prompt_engine import (
 )
 
 
-def test_ui_compiled_prompt_is_sent_to_nano_banana_verbatim(tmp_path: Path):
+def test_internal_compiled_prompt_is_adapted_for_nano_banana_transport(tmp_path: Path):
     compiled = PromptEngine().compile(
         PromptContext(
             stage="environment",
@@ -42,16 +42,17 @@ def test_ui_compiled_prompt_is_sent_to_nano_banana_verbatim(tmp_path: Path):
     )
 
     assert payload["model"] == "google/gemini-2.5-flash-image"
-    assert payload["prompt"] == compiled["prompt"]
+    assert payload["prompt"] != compiled["prompt"]
+    assert payload["prompt"].startswith("NANO BANANA EXECUTION PROMPT v1")
     assert len(payload["input_references"]) == 1
     assert OPERATOR_PROMPT_MARKER in payload["prompt"]
-    assert FINAL_COMMAND_MARKER in payload["prompt"]
     assert GENERATION_MODE_MARKER in payload["prompt"]
     assert "GENERATION MODE\nHYBRID" in payload["prompt"]
     assert "Убрать столбы и провода." in payload["prompt"]
     assert "Сделать облачную погоду." in payload["prompt"]
-    assert compiled["prompt_transport_policy"] == "ui-compiled-prompt-sent-verbatim"
-    assert compiled["prompt_sha256"]
+    assert "RELIGHT / NEW LIGHTING SKILL" not in payload["prompt"]
+    assert "SYSTEM PRESERVATION CONTRACT" not in payload["prompt"]
+    assert engine.nano_banana_prompt_transport_policy == "internal-contract-to-concise-nano-banana-execution-v1"
 
 
 def test_operator_prompt_is_primary_and_repeated_as_final_command(tmp_path: Path):
