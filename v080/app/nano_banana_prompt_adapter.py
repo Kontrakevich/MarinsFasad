@@ -20,11 +20,11 @@ class OpenRouterImageEngine(_RetryOpenRouterImageEngine):
     The long compiled prompt remains the internal/audit contract. Nano Banana
     receives a shorter execution prompt that preserves the operator request,
     active skill, quality and geometry constraints without repeating every skill
-    contract. A manually edited execution prompt carrying the adapter marker is
-    sent verbatim.
+    contract. Already concise internal-pass prompts and manually edited provider
+    prompts are sent verbatim.
     """
 
-    nano_banana_prompt_adapter_version = "1.0.0"
+    nano_banana_prompt_adapter_version = "1.0.1"
     nano_banana_prompt_transport_policy = "internal-contract-to-concise-nano-banana-execution-v1"
     adapter_marker = "NANO BANANA EXECUTION PROMPT v1"
 
@@ -104,11 +104,22 @@ class OpenRouterImageEngine(_RetryOpenRouterImageEngine):
         }[quality]
 
     @classmethod
+    def _is_internal_compiled_contract(cls, prompt: str) -> bool:
+        text = str(prompt or "")
+        return (
+            "SYSTEM PRESERVATION CONTRACT" in text
+            or "ACTIVE SKILL CONTRACT" in text
+            or FINAL_COMMAND_MARKER in text
+        )
+
+    @classmethod
     def adapt_execution_prompt(cls, compiled_prompt: str) -> str:
         source = str(compiled_prompt or "").strip()
         if not source:
             return source
         if source.startswith(cls.adapter_marker):
+            return source
+        if not cls._is_internal_compiled_contract(source):
             return source
 
         mode = cls._mode(source)
@@ -147,8 +158,6 @@ class OpenRouterImageEngine(_RetryOpenRouterImageEngine):
 
     def _provider_prompt(self, prompt: str) -> tuple[str, bool]:
         exact = str(prompt or "").strip()
-        if exact.startswith(self.adapter_marker):
-            return exact, True
         adapted = self.adapt_execution_prompt(exact)
         return adapted, OPERATOR_PROMPT_MARKER in exact
 
