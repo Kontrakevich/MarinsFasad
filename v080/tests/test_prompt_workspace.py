@@ -28,7 +28,7 @@ def test_environment_prompt_exposes_concise_nano_banana_prompt_and_internal_cont
     assert "SYSTEM PRESERVATION CONTRACT" not in payload["prompt"]
     assert "SYSTEM PRESERVATION CONTRACT" in payload["internal_prompt"]
     assert payload["prompt_source"] == "nano-banana-adapted"
-    assert payload["nano_banana_prompt_adapter_version"] == "1.0.0"
+    assert payload["nano_banana_prompt_adapter_version"] == "1.0.1"
 
 
 def test_manual_provider_prompt_override_is_used_until_source_prompt_changes() -> None:
