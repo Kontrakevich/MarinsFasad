@@ -4,6 +4,7 @@
   const previousFetch = window.fetch.bind(window);
   let activeProjectId = '';
   let latestIntelligence = null;
+  let latestIntentRoute = null;
 
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -70,26 +71,38 @@
     return `<div class="system1-card"><header><span>${esc(title)}</span><span class="system1-state">${esc(state)}</span></header><strong>${esc(cause)}</strong><p>${esc(why)}</p>${route ? `<p>ROUTE: ${esc(route)}</p>` : ''}</div>`;
   }
 
+  function intentRouterCard(route) {
+    if (!route) {
+      return '<div class="system1-card"><header><span>INTENT → SKILL</span><span>—</span></header><p>Маршрутизация появится после компиляции prompt.</p></div>';
+    }
+    const requested = String(route.requested_mode || '—').toUpperCase();
+    const effective = String(route.effective_mode || '—').toUpperCase();
+    const status = route.auto_routed ? 'AUTO ROUTED' : 'UNCHANGED';
+    const signals = (route.signals || []).join(', ') || 'no conflict';
+    return `<div class="system1-card"><header><span>INTENT → SKILL</span><span class="system1-state">${esc(status)}</span></header><strong>${esc(requested)} → ${esc(effective)}</strong><p>${esc(signals)}</p><p>${esc(route.reason || '')}</p></div>`;
+  }
+
   function render(data) {
     installPanel();
     const output = document.getElementById('system1-output');
     if (!output) return;
-    if (!data) {
+    if (!data && !latestIntentRoute) {
       output.textContent = 'System №1 ещё не получил данные запуска.';
       return;
     }
-    const run = data.latest_run;
-    const feedback = data.latest_feedback;
-    const trace = (data.recent_trace || []).slice(-8);
+    const run = data?.latest_run;
+    const feedback = data?.latest_feedback;
+    const trace = (data?.recent_trace || []).slice(-8);
     const layer2State = feedback?.analysis?.status === 'GATED_BY_LAYER1'
       ? 'Layer 2 заблокирован: Layer 1 уже нашёл техническую причину.'
       : 'Layer 2 запускается только после чистого Layer 1.';
     output.innerHTML = `
-      <div class="system1-card"><header><span>PIPELINE</span><span>v${esc(data.version || '1.0.0')}</span></header><strong>L1 TECHNICAL → L2 HUMAN ALIGNMENT</strong><p>${esc(layer2State)}</p><p>RUN: ${esc(run?.run_id || '—')} · ${esc(run?.status || 'idle')}</p></div>
-      ${diagnosisCard('LAYER 1 · TECHNICAL', data.layer1_technical, 'Техническая диагностика появится после генерации.')}
-      ${diagnosisCard('LAYER 2 · ALIGNMENT', data.layer2_alignment, 'Не запускался или пока заблокирован Layer 1.')}
-      <div class="system1-card"><header><span>LEARNING</span><span>SAFE</span></header><p>Regression cases: ${esc(data.counts?.regressions || 0)}</p><p>Preference candidates: ${esc(data.counts?.preferences || 0)}</p><p>Постоянные правила автоматически не продвигаются.</p></div>
-      <div class="system1-card"><header><span>RUN TRACE</span><span>${esc(data.counts?.events || 0)} events</span></header><div class="system1-trace">${trace.length ? trace.map(item => `${esc(item.status)} · ${esc(item.event_type)} · ${esc(item.component)}`).join('<br>') : 'Нет событий.'}</div></div>
+      <div class="system1-card"><header><span>PIPELINE</span><span>v${esc(data?.version || '1.0.0')}</span></header><strong>L1 TECHNICAL → L2 HUMAN ALIGNMENT</strong><p>${esc(layer2State)}</p><p>RUN: ${esc(run?.run_id || '—')} · ${esc(run?.status || 'idle')}</p></div>
+      ${intentRouterCard(latestIntentRoute)}
+      ${diagnosisCard('LAYER 1 · TECHNICAL', data?.layer1_technical, 'Техническая диагностика появится после генерации.')}
+      ${diagnosisCard('LAYER 2 · ALIGNMENT', data?.layer2_alignment, 'Не запускался или пока заблокирован Layer 1.')}
+      <div class="system1-card"><header><span>LEARNING</span><span>SAFE</span></header><p>Regression cases: ${esc(data?.counts?.regressions || 0)}</p><p>Preference candidates: ${esc(data?.counts?.preferences || 0)}</p><p>Постоянные правила автоматически не продвигаются.</p></div>
+      <div class="system1-card"><header><span>RUN TRACE</span><span>${esc(data?.counts?.events || 0)} events</span></header><div class="system1-trace">${trace.length ? trace.map(item => `${esc(item.status)} · ${esc(item.event_type)} · ${esc(item.component)}`).join('<br>') : 'Нет событий.'}</div></div>
     `;
   }
 
@@ -106,9 +119,15 @@
     installPanel();
     const response = await previousFetch(input, init);
     const url = typeof input === 'string' ? input : input?.url || '';
+    const projectMatch = url.match(/\/api\/projects\/([^/?]+)/);
+    if (projectMatch?.[1]) activeProjectId = projectMatch[1];
     if (!url.includes('/assets/')) {
       try {
         const payload = await response.clone().json();
+        if (payload?.intent_router) {
+          latestIntentRoute = payload.intent_router;
+          render(latestIntelligence);
+        }
         if (payload?.system1_intelligence) acceptProject(payload);
         if (payload?.project?.system1_intelligence) acceptProject(payload.project);
       } catch (_) {}
