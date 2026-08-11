@@ -32,14 +32,15 @@ def test_generation_polling_is_detached_from_button_busy_state():
     assert "const snapshot = await projectSnapshotResponse(details.projectId)" in bridge
 
 
-def test_build_replaces_frontend_cache_key_for_console_only_workspace():
+def test_build_replaces_frontend_cache_key_for_responsive_console_workspace():
     build = (ROOT / "build.sh").read_text("utf-8")
     start = (ROOT / "start.sh").read_text("utf-8")
     for script in (build, start):
-        assert "system1-console-all-3450" in script
+        assert "system1-grid-console-3460" in script
         assert "command-console-patch.js" in script
         assert "lower-console-patch.js" in script
         assert "minimum-font-patch.js" in script
+        assert "system1-grid-console-v1" in script
 
 
 def test_lower_workspace_moves_into_command_console():
@@ -58,6 +59,18 @@ def test_minimum_font_is_ten_points_for_existing_and_dynamic_ui():
     assert "MIN_FONT_PT * 96 / 72" in patch
     assert "MutationObserver" in patch
     assert "font-size" in patch
+
+
+def test_ten_point_typography_is_reflowed_on_responsive_grid():
+    patch = (ROOT / "ui_single_window" / "minimum-font-patch.js").read_text("utf-8")
+    assert "system1-grid-console-v1" in patch
+    assert "--projects:clamp(220px,13.5vw,250px)" in patch
+    assert "--inspector:clamp(360px,23vw,420px)" in patch
+    assert "grid-template-columns:var(--projects) minmax(0,1fr) var(--inspector)" in patch
+    assert ".bottom-pane{display:none!important}" in patch
+    assert ".command-suggestions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))" in patch
+    assert "@media (max-width:1500px)" in patch
+    assert "@media (max-width:1180px)" in patch
 
 
 def test_quality_build_keeps_resilient_generation_bridge_and_workspace_controls():
