@@ -17,7 +17,7 @@ class IntentSkillRouter:
     policy = "outpaint-semantic-conflict-promotes-to-hybrid"
 
     _REMOVE = re.compile(
-        r"(?:\bудал(?:и|ить|ите|яем|ить\s+все)?\b|\bубер(?:и|ите|ать)\b|"
+        r"(?:\bудал(?:и|ить|ите|яем|ить\s+все)?\b|\bуб(?:ери|ерите|рать)\b|"
         r"\bочист(?:и|ить|ите)\b|\bremove\b|\bdelete\b|\berase\b|\bcleanup\b)",
         re.IGNORECASE,
     )
