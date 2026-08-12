@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 cp -f "$ROOT/ui_single_window/index.html" "$ROOT/app/web/index.html"
-sed -i 's/prompt-workspace-3430/system1-grid-prompt-3470/g; s/system1-command-console-3440/system1-grid-prompt-3470/g; s/system1-console-all-3450/system1-grid-prompt-3470/g; s/system1-grid-console-3460/system1-grid-prompt-3470/g; s/resilient-fullframe-0806/quality-outpaint-3400/g; s/selective-nanobanana-0806/quality-outpaint-3400/g; s/geometry-only-outpaint-0806/quality-outpaint-3400/g; s/stable-nanobanana-3000/quality-outpaint-3400/g; s/working-master-3001/quality-outpaint-3400/g; s/hybrid-edit-3100/quality-outpaint-3400/g; s/hybrid-two-pass-3200/quality-outpaint-3400/g; s/skill-contracts-3300/quality-outpaint-3400/g' "$ROOT/app/web/index.html"
+sed -i 's/prompt-workspace-3430/system1-grid-prompt-3480/g; s/system1-command-console-3440/system1-grid-prompt-3480/g; s/system1-console-all-3450/system1-grid-prompt-3480/g; s/system1-grid-console-3460/system1-grid-prompt-3480/g; s/system1-grid-prompt-3470/system1-grid-prompt-3480/g; s/resilient-fullframe-0806/quality-outpaint-3400/g; s/selective-nanobanana-0806/quality-outpaint-3400/g; s/geometry-only-outpaint-0806/quality-outpaint-3400/g; s/stable-nanobanana-3000/quality-outpaint-3400/g; s/working-master-3001/quality-outpaint-3400/g; s/hybrid-edit-3100/quality-outpaint-3400/g; s/hybrid-two-pass-3200/quality-outpaint-3400/g; s/skill-contracts-3300/quality-outpaint-3400/g' "$ROOT/app/web/index.html"
 sed -i 's/V0.8.0/V0.8.1 QUALITY/g; s/ORIGINAL MASTER/WORKING MASTER/g; s/NO DOWNSCALE/GENERATION SCALE/g; s/Файл сохраняется без уменьшения и перекодирования. Preview существует отдельно./Оригинал сохраняется в архиве проекта. Для сетки и генерации используется облегчённый рабочий master./g' "$ROOT/app/web/index.html"
 cp -f "$ROOT/ui_single_window/styles.css" "$ROOT/app/web/styles.css"
 cat "$ROOT/ui_single_window/async-generation-bridge.js" "$ROOT/ui_single_window/app-v080.js" "$ROOT/ui_single_window/grid-ux-patch.js" "$ROOT/ui_single_window/hybrid-mode-patch.js" "$ROOT/ui_single_window/system1-intelligence-patch.js" "$ROOT/ui_single_window/workspace-controls-patch.js" "$ROOT/ui_single_window/command-console-patch.js" "$ROOT/ui_single_window/lower-console-patch.js" "$ROOT/ui_single_window/prompt-workspace-console-patch.js" "$ROOT/ui_single_window/minimum-font-patch.js" > "$ROOT/app/web/app-v080.js"
@@ -14,7 +14,7 @@ sed -i 's/Production policy: original resolution\./Рабочий master опт�
 sed -i 's/V0.8.0 HYBRID/V0.8.1 QUALITY/g; s/V0.8.1 HYBRID/V0.8.1 QUALITY/g; s/V0.8.1 SKILLS/V0.8.1 QUALITY/g' "$ROOT/app/web/app-v080.js"
 cp -f "$ROOT/ui_single_window/marins-logo.svg" "$ROOT/app/web/marins-logo.svg"
 
-grep -q 'system1-grid-prompt-3470' "$ROOT/app/web/index.html"
+grep -q 'system1-grid-prompt-3480' "$ROOT/app/web/index.html"
 grep -q 'TRANSIENT_HTTP_STATUSES' "$ROOT/app/web/app-v080.js"
 grep -q 'startDetachedPolling' "$ROOT/app/web/app-v080.js"
 grep -q 'projectSnapshotResponse' "$ROOT/app/web/app-v080.js"
@@ -98,7 +98,7 @@ print("Skill Engine 3.4.0 verified")
 print("Nano Banana Prompt Adapter 1.0.1 verified")
 print("System №1 Command Console verified")
 print("Generation UI: background polling detached from button busy state")
-print("Pre-generation Nano Banana prompt editor verified")
+print("Pre-generation Nano Banana prompt editor: active")
 print("Lower workspace: HISTORY / CANDIDATES / EVENTS moved to console")
 print("Typography: minimum font size 10 pt enforced")
 print("Layout: responsive three-column grid verified")
@@ -125,4 +125,4 @@ MARINS_DATA_ROOT="$ROOT/.test-data/projects" \
 python -m pytest -vv --timeout=60 --timeout-method=thread
 rm -rf .test-data
 
-echo "Marins Facade v0.8.1 System1 pre-generation prompt workspace build passed"
+echo "Marins Facade v0.8.1 System1 prompt-editor build passed"
