@@ -36,7 +36,7 @@ def test_build_replaces_frontend_cache_key_for_pre_generation_prompt_workspace()
     build = (ROOT / "build.sh").read_text("utf-8")
     start = (ROOT / "start.sh").read_text("utf-8")
     for script in (build, start):
-        assert "system1-grid-prompt-3470" in script
+        assert "system1-grid-prompt-3480" in script
         assert "command-console-patch.js" in script
         assert "lower-console-patch.js" in script
         assert "prompt-workspace-console-patch.js" in script
@@ -88,14 +88,14 @@ def test_pre_generation_prompt_is_always_visible_and_editable_in_console():
     assert "/prompt/environment/edit" in patch
 
 
-def test_prompt_editor_does_not_reload_on_generation_polling():
+def test_prompt_workspace_does_not_reload_from_generation_polling():
     patch = (ROOT / "ui_single_window" / "prompt-workspace-console-patch.js").read_text("utf-8")
-    assert "loadedPromptKey" in patch
-    assert "loadedPromptKey === key" in patch
     assert "allowPromptLoad = true" in patch
-    assert "allowPromptLoad: false" in patch
-    assert "Polling updates project/process state, but must never reload the prompt editor." in patch
-    assert "!url.includes('/assets/') && !isPromptRequest" in patch
+    assert "acceptProject(event.detail.project, {allowPromptLoad: false})" in patch
+    assert "loadedContextKey" in patch
+    assert "loadState" in patch
+    assert "if (!force && ['dirty', 'saving', 'rebuilding', 'loading'].includes(loadState)) return null" in patch
+    assert "if (!force && loadedContextKey === contextKey) return null" in patch
 
 
 def test_quality_build_keeps_resilient_generation_bridge_and_workspace_controls():
