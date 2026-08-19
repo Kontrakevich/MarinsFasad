@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "id": "hybrid",
+  "version": "1.0",
+  "description": "Composite execution for semantic edits plus outpaint/relight when one isolated skill is insufficient.",
+  "inputs": ["image/approved", "text/prompt"],
+  "outputs": ["image/candidate"],
+  "handler": "app.skill_engine:OpenRouterImageEngine.generate_environment",
+  "providers": ["openrouter", "nano-banana"],
+  "requires": ["approved-geometry", "intent-skill-router"],
+  "diagnostics": true,
+  "deterministic": false
+}

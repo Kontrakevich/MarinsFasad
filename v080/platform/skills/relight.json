@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "id": "relight",
+  "version": "1.0",
+  "description": "Scene-wide lighting, weather or time-of-day transformation with approved geometry lock.",
+  "inputs": ["image/approved", "text/prompt"],
+  "outputs": ["image/candidate"],
+  "handler": "app.skill_engine:OpenRouterImageEngine.generate_environment",
+  "providers": ["openrouter", "nano-banana"],
+  "requires": ["approved-geometry"],
+  "diagnostics": true,
+  "deterministic": false
+}
