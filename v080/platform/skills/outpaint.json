@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "id": "outpaint",
+  "version": "1.0",
+  "description": "Reconstruct missing canvas regions while preserving approved visible pixels, camera and geometry.",
+  "inputs": ["image/approved", "text/prompt"],
+  "outputs": ["image/candidate"],
+  "handler": "app.skill_engine:OpenRouterImageEngine.generate_environment",
+  "providers": ["openrouter", "nano-banana"],
+  "requires": ["approved-geometry", "missing-region-detection"],
+  "diagnostics": true,
+  "deterministic": false
+}
