@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "id": "geometry",
+  "version": "1.0",
+  "description": "Perspective correction and approved geometry preparation without destructive source overwrite.",
+  "inputs": ["image/source"],
+  "outputs": ["image/working", "image/approved"],
+  "handler": "app.geometry_engine:GeometryEngine",
+  "providers": [],
+  "requires": [],
+  "diagnostics": true,
+  "deterministic": true
+}
