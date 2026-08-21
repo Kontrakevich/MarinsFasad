@@ -1,0 +1,67 @@
+{
+  "schema_version": "1.0",
+  "project": {
+    "id": "marins-fasad",
+    "name": "MarinsFasad",
+    "version": "0.8.1",
+    "type": "visual-ai",
+    "description": "Architecture-preserving facade visualization workflow with geometry correction, image edit, relight, outpaint, QC and System №1 diagnostics.",
+    "repository_role": "standalone"
+  },
+  "runtime": {
+    "class": "server-cloud",
+    "language": "python",
+    "entrypoint": "app.main:app",
+    "start": "v080/start.sh",
+    "build": "v080/build.sh",
+    "health": "/api/health",
+    "default_port": 8070,
+    "working_directory": "v080"
+  },
+  "ui": {
+    "type": "embedded-web",
+    "path": "v080/app/web",
+    "route": "/"
+  },
+  "skills": [
+    {"id": "geometry", "manifest": "v080/platform/skills/geometry.json"},
+    {"id": "image-edit", "manifest": "v080/platform/skills/image-edit.json"},
+    {"id": "relight", "manifest": "v080/platform/skills/relight.json"},
+    {"id": "outpaint", "manifest": "v080/platform/skills/outpaint.json"},
+    {"id": "hybrid", "manifest": "v080/platform/skills/hybrid.json"}
+  ],
+  "capabilities": [
+    "image-input",
+    "geometry-correction",
+    "image-generation",
+    "image-edit",
+    "relight",
+    "outpaint",
+    "quality-control",
+    "background-runs",
+    "system1-diagnostics"
+  ],
+  "providers": ["openrouter", "nano-banana"],
+  "required_secrets": ["OPENROUTER_API_KEY"],
+  "storage": {
+    "code": "git",
+    "runtime_data": "external",
+    "artifacts": "external",
+    "originals_immutable": true,
+    "preview_separate": true
+  },
+  "diagnostics": {
+    "enabled": true,
+    "system": "system1",
+    "endpoint": "/api/projects/{project_id}/diagnostics",
+    "redaction_required": true
+  },
+  "tests": {
+    "smoke": "cd v080 && python -m pytest tests/test_smoke.py",
+    "full": "cd v080 && python -m pytest"
+  },
+  "import": {
+    "compatibility": "compatible",
+    "adapter": "v080/platform/adapter.md"
+  }
+}

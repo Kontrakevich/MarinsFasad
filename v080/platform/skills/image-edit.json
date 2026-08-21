@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "id": "image-edit",
+  "version": "1.0",
+  "description": "Targeted semantic image edits while preserving approved camera, geometry and untouched regions.",
+  "inputs": ["image/approved", "text/prompt"],
+  "outputs": ["image/candidate"],
+  "handler": "app.skill_engine:OpenRouterImageEngine.generate_environment",
+  "providers": ["openrouter", "nano-banana"],
+  "requires": ["approved-geometry"],
+  "diagnostics": true,
+  "deterministic": false
+}

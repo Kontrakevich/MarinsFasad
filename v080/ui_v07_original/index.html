@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Marins Facade — Control Center v0.6.6</title>
+  <link rel="stylesheet" href="/static/styles.css?v=0.6.1">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="#top" aria-label="Marins Architecture">
+    <img class="brand-logo" src="/static/marins-logo.svg?v=0.6.0" alt="Marins"><span class="brand-caption">ARCHITECTURE / AI WORKFLOW</span>
+  </a>
+  <div class="header-meta">
+    <span>FACADE PIPELINE</span>
+    <span>V0.6.6</span>
+    <span id="health" class="system-state"><i></i>Проверка системы</span>
+  </div>
+</header>
+
+<main id="top" class="page-shell">
+  <section class="hero">
+    <div class="hero-index">00</div>
+    <div class="hero-copy">
+      <p class="eyebrow">MARINS FACADE / CLEAN STAGED PIPELINE</p>
+      <h1>Геометрия отдельно.<br>AI только после утверждения.</h1>
+      <p class="hero-description">Source → Geometry → Approval → Environment → Final → Branding. Каждый этап хранит skill, prompt, версии и замечания.</p>
+    </div>
+    <div class="hero-aside"><span>VERSION</span><strong>0.6.6</strong><span>MODE</span><strong>REVIEW FIRST</strong></div>
+  </section>
+
+  <section class="project-bar">
+    <div>
+      <p class="eyebrow">PROJECT MANAGER</p>
+      <h2 id="project-title">Проект не выбран</h2>
+      <div id="project-list" class="project-list"></div>
+    </div>
+    <div class="project-bar__controls">
+      <button id="new-project" class="button button-primary">Новый проект</button>
+    </div>
+  </section>
+
+  <section id="onboarding" class="onboarding-panel">
+    <div class="onboarding-panel__index">START</div>
+    <div>
+      <p class="eyebrow">ПЕРВЫЙ ЗАПУСК</p>
+      <h2>Создайте рабочий проект</h2>
+      <p class="onboarding-panel__lead">До выбора проекта система ничего не запускает. Начните с новой карточки проекта, затем загрузите исходную фотографию фасада.</p>
+      <ol class="onboarding-steps">
+        <li><strong>Создайте проект</strong><span>Нажмите «Новый проект» и задайте понятное название объекта.</span></li>
+        <li><strong>Загрузите исходник</strong><span>Фото появится в редакторе перспективы и останется неизменным.</span></li>
+        <li><strong>Идите по этапам</strong><span>Geometry → Approval → Environment → Final → Branding.</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="workspace" class="hidden">
+    <div id="stage-strip" class="stage-strip"></div>
+
+    <nav class="step-nav" aria-label="Этапы процесса">
+      <a href="#source"><span>01</span>Исходник</a>
+      <a href="#geometry"><span>02</span>Геометрия</a>
+      <a href="#environment"><span>03</span>Окружение</a>
+      <a href="#branding"><span>04</span>Вывеска</a>
+      <a href="#history"><span>05</span>История</a>
+    </nav>
+
+    <section id="action-feedback" class="action-feedback" role="status" aria-live="polite">
+      <div id="action-code" class="action-feedback__code">ACTION / READY</div>
+      <div><strong id="action-title">Система готова</strong><p id="action-description">Выберите этап и действие.</p></div>
+    </section>
+
+    <section id="source" class="workflow-section">
+      <div class="section-index">01</div>
+      <div class="section-title"><p class="eyebrow">SOURCE</p><h2>Исходное изображение</h2><p>Исходник неизменяем. Все последующие этапы создают отдельные версии.</p></div>
+      <div class="section-content">
+        <div class="source-path-block">
+          <label class="field-group source-path-field"><span class="field-label">Изображение фасада</span><input id="source-file" type="file" accept="image/jpeg,image/png,image/webp"></label>
+          <div class="source-path-actions"><button id="upload-source" class="button button-primary">Загрузить исходник</button></div>
+        </div>
+        <div id="source-status" class="status-line">Файл не загружен.</div>
+      </div>
+    </section>
+
+    <section id="geometry" class="workflow-section">
+      <div class="section-index">02</div>
+      <div class="section-title"><p class="eyebrow">DETERMINISTIC GEOMETRY</p><h2>Perspective grid</h2><p>Совместите сетку с плоскостью фасада. Полный кадр трансформируется без кропа по границе сетки.</p></div>
+      <div class="section-content">
+        <div id="geometry-empty" class="empty-note">Сначала загрузите исходник.</div>
+        <div id="geometry-editor" class="hidden">
+          <div class="editor-shell"><canvas id="geometry-canvas"></canvas><div class="editor-hint">Перетаскивайте четыре угловые точки. Двойной щелчок сбрасывает сетку.</div></div>
+          <div class="editor-actions"><button id="geometry-reset" class="button button-secondary">Сбросить сетку</button><button id="geometry-undo" class="button button-secondary">Undo</button><button id="geometry-redo" class="button button-secondary">Redo</button><button id="geometry-apply" class="button button-primary">Применить трансформацию</button></div>
+          <div id="geometry-comparison" class="comparison-grid hidden top-gap"><div class="comparison-panel"><span class="panel-kicker">SOURCE</span><img id="geometry-before" alt="Исходник"></div><div class="comparison-panel geometry-corrected-panel"><span class="panel-kicker">CORRECTED — EMPTY AREAS FOR OUTPAINT</span><img id="geometry-after" alt="Геометрия без зеркальной дорисовки"></div></div>
+          <div class="side-by-side top-gap">
+            <div class="skill-panel"><span class="panel-kicker">CURRENT GEOMETRY SKILL</span><textarea id="geometry-skill" readonly></textarea></div>
+            <div class="review-box"><span class="panel-kicker">VISUAL REVIEW</span><textarea id="geometry-comment" placeholder="Комментарий к геометрии"></textarea><div class="editor-actions"><button data-stage="geometry" class="approve-stage button button-primary">Подтвердить геометрию</button><button data-stage="geometry" class="revise-stage button button-danger">На доработку</button></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="environment" class="workflow-section">
+      <div class="section-index">03</div>
+      <div class="section-title"><p class="eyebrow">AI ENVIRONMENT</p><h2>Окружение и очистка</h2><p>Nano Banana получает только утвержденную геометрию. Prompt всегда виден до запуска.</p></div>
+      <div class="section-content">
+        <div class="side-by-side">
+          <div>
+            <div class="comparison-grid"><div class="comparison-panel"><span class="panel-kicker">APPROVED GEOMETRY</span><img id="environment-before" alt="Утвержденная геометрия"></div><div class="comparison-panel"><span class="panel-kicker">AI RESULT</span><img id="environment-after" alt="Окружение"></div></div>
+            <div id="environment-runtime" class="runtime-card">Нет запуска.</div>
+          </div>
+          <div>
+            <label class="prompt-panel-v060"><span class="panel-kicker">COMPILED SYSTEM PROMPT</span><textarea id="environment-prompt" readonly></textarea></label>
+            <label class="field-group top-gap"><span class="field-label">Дополнение оператора</span><textarea id="environment-extra" rows="7" placeholder="Например: убрать провода и автомобили, сохранить архитектуру без изменений"></textarea></label>
+            <div class="editor-actions"><button id="environment-refresh-prompt" class="button button-secondary">Обновить prompt</button><button id="environment-generate" class="button button-primary">Запустить Nano Banana</button></div>
+            <div class="review-box"><textarea id="environment-comment" placeholder="Комментарий к результату окружения"></textarea><div class="editor-actions"><button data-stage="environment" class="approve-stage button button-primary">Подтвердить окружение</button><button data-stage="environment" class="revise-stage button button-danger">На доработку</button></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="branding" class="workflow-section">
+      <div class="section-index">04</div>
+      <div class="section-title"><p class="eyebrow">BRANDING</p><h2>Зона и вывеска</h2><p>Нарисуйте прямоугольную область вывески на final-изображении, загрузите логотип и задайте материал.</p></div>
+      <div class="section-content">
+        <div class="zone-grid">
+          <div class="zone-canvas-shell"><canvas id="branding-canvas"></canvas></div>
+          <div class="field-stack">
+            <label class="field-group"><span class="field-label">Master logo</span><input id="branding-logo" type="file" accept=".svg,image/*"></label>
+            <label class="field-group"><span class="field-label">Материал и подсветка</span><textarea id="branding-material" rows="8" placeholder="Материал, толщина букв, подсветка, крепление"></textarea></label>
+            <div id="branding-zone-text" class="status-line">Зона не задана.</div>
+            <button id="branding-setup" class="button button-secondary">Зафиксировать зону и параметры</button>
+            <label class="prompt-panel-v060"><span class="panel-kicker">COMPILED BRANDING PROMPT</span><textarea id="branding-prompt" readonly></textarea></label>
+            <label class="field-group"><span class="field-label">Дополнение оператора</span><textarea id="branding-extra" rows="5"></textarea></label>
+            <button id="branding-generate" class="button button-primary">Сгенерировать вывеску</button>
+          </div>
+        </div>
+        <div id="branding-comparison" class="comparison-grid top-gap"><div class="comparison-panel"><span class="panel-kicker">FINAL</span><img id="branding-before" alt="Final"></div><div class="comparison-panel"><span class="panel-kicker">BRANDING RESULT</span><img id="branding-after" alt="Вывеска"></div></div>
+        <div class="review-box"><textarea id="branding-comment" placeholder="Комментарий к вывеске"></textarea><div class="editor-actions"><button data-stage="branding" class="approve-stage button button-primary">Подтвердить вывеску</button><button data-stage="branding" class="revise-stage button button-danger">На доработку</button></div></div>
+      </div>
+    </section>
+
+    <section id="history" class="workflow-section">
+      <div class="section-index">05</div>
+      <div class="section-title"><p class="eyebrow">AUDIT TRAIL</p><h2>История и диагностика</h2><p>Все операции, комментарии, версии и provider metadata сохраняются в проекте.</p></div>
+      <div class="section-content"><button id="refresh-history" class="button button-secondary">Обновить историю</button><div id="history-list" class="history-list top-gap"></div></div>
+    </section>
+  </div>
+</main>
+<script src="/static/app.js?v=0.6.1"></script>
+
+<script>
+// v0.6.6 API error diagnostics
+(() => {
+  const originalFetch = window.fetch.bind(window);
+  window.__marinsLastApiError = '';
+
+  function readableError(text, status) {
+    if (!text) return `Сервер вернул пустой ответ${status ? ` (HTTP ${status})` : ''}.`;
+    try {
+      const data = JSON.parse(text);
+      const detail = data.detail || data.message || data.error?.message || data.error;
+      const diagnostic = data.diagnostic ? `\nДиагностика: ${data.diagnostic}` : '';
+      return `${detail || text}${diagnostic}`;
+    } catch (_) {
+      return text;
+    }
+  }
+
+  window.fetch = async (...args) => {
+    const response = await originalFetch(...args);
+    if (!response.ok) {
+      const text = await response.clone().text();
+      window.__marinsLastApiError = readableError(text, response.status);
+    }
+    return response;
+  };
+
+  const modal = document.createElement('div');
+  modal.id = 'marins-error-modal';
+  modal.className = 'marins-error-modal hidden';
+  modal.innerHTML = `
+    <div class="marins-error-modal__card" role="alertdialog" aria-modal="true">
+      <p class="eyebrow">ОШИБКА ГЕНЕРАЦИИ</p>
+      <h3>Nano Banana не вернул результат</h3>
+      <pre id="marins-error-modal-text"></pre>
+      <button type="button" id="marins-error-modal-close">Закрыть</button>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const nativeAlert = window.alert.bind(window);
+  window.alert = message => {
+    const text = String(message || '').trim() || window.__marinsLastApiError || 'Неизвестная ошибка. Подробности записаны в диагностике проекта.';
+    if (!modal?.classList) return nativeAlert(text);
+    document.getElementById('marins-error-modal-text').textContent = text;
+    modal.classList.remove('hidden');
+  };
+
+  document.getElementById('marins-error-modal-close').onclick = () => modal.classList.add('hidden');
+  modal.addEventListener('click', event => {
+    if (event.target === modal) modal.classList.add('hidden');
+  });
+})();
+</script>
+
+
+<script>
+// v0.6.6 task status monitor
+(() => {
+  const statusLabels = {
+    idle: 'Ожидание',
+    running: 'Выполняется',
+    review: 'Нужна проверка',
+    approved: 'Подтверждено',
+    failed: 'Ошибка',
+    timeout: 'Тайм-аут'
+  };
+  const stageLabels = {
+    geometry: 'Геометрия',
+    environment: 'Окружение',
+    branding: 'Вывеска'
+  };
+  let trackedProjectId = null;
+  let pollTimer = null;
+  let lastTask = null;
+  const wrappedFetch = window.fetch.bind(window);
+
+  function ensureUi() {
+    if (!document.getElementById('task-status-header')) {
+      const title = document.getElementById('project-title');
+      const host = title?.parentElement || document.querySelector('#workspace header') || document.querySelector('#workspace');
+      if (host) {
+        const header = document.createElement('div');
+        header.id = 'task-status-header';
+        header.className = 'task-status-header is-idle';
+        header.innerHTML = `
+          <span class="task-status-header__kicker">ТЕКУЩАЯ ЗАДАЧА</span>
+          <div class="task-status-header__row">
+            <strong id="task-status-header-title">Нет активной задачи</strong>
+            <span id="task-status-header-pill" class="task-status-pill is-idle">ОЖИДАНИЕ</span>
+          </div>
+          <div id="task-status-header-message" class="task-status-header__message">Система готова к запуску.</div>
+          <div class="task-status-progress"><span id="task-status-header-progress"></span></div>
+          <div id="task-status-header-meta" class="task-status-header__meta"></div>`;
+        host.appendChild(header);
+      }
+    }
+
+    if (!document.getElementById('task-status-stage')) {
+      const runButton = document.getElementById('run-environment') ||
+        [...document.querySelectorAll('button')].find(button => /nano banana/i.test(button.textContent || ''));
+      const host = runButton?.parentElement;
+      if (host) {
+        const panel = document.createElement('section');
+        panel.id = 'task-status-stage';
+        panel.className = 'task-status-stage is-idle';
+        panel.innerHTML = `
+          <div class="task-status-stage__top">
+            <span class="task-status-stage__kicker">СОСТОЯНИЕ ЗАДАЧИ</span>
+            <span id="task-status-stage-pill" class="task-status-pill is-idle">ОЖИДАНИЕ</span>
+          </div>
+          <strong id="task-status-stage-title">Запуск не выполняется</strong>
+          <div id="task-status-stage-message">Нажмите «Запустить Nano Banana» после проверки prompt.</div>
+          <div class="task-status-progress"><span id="task-status-stage-progress"></span></div>
+          <div id="task-status-stage-meta" class="task-status-stage__meta"></div>`;
+        host.insertAdjacentElement('afterend', panel);
+      }
+    }
+  }
+
+  function elapsed(task) {
+    if (!task?.started_at) return '';
+    const end = task.finished_at ? new Date(task.finished_at).getTime() : Date.now();
+    const seconds = Math.max(0, Math.floor((end - new Date(task.started_at).getTime()) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    const rest = seconds % 60;
+    return `${minutes}:${String(rest).padStart(2, '0')}`;
+  }
+
+  function renderTask(task) {
+    ensureUi();
+    lastTask = task || null;
+    const status = task?.status || 'idle';
+    const stage = task?.stage || null;
+    const progress = Number.isFinite(Number(task?.progress)) ? Number(task.progress) : 0;
+    const title = stage ? `${stageLabels[stage] || stage} · ${statusLabels[status] || status}` : 'Нет активной задачи';
+    const message = task?.message || 'Система готова к запуску.';
+    const metaParts = [];
+    if (task?.job_id) metaParts.push(`ID: ${task.job_id}`);
+    if (task?.started_at) metaParts.push(`Время: ${elapsed(task)}`);
+    if (task?.diagnostic) metaParts.push(`Диагностика: ${task.diagnostic}`);
+    const meta = metaParts.join(' · ');
+
+    for (const id of ['task-status-header', 'task-status-stage']) {
+      const element = document.getElementById(id);
+      if (element) element.className = `${id} is-${status}`;
+    }
+    for (const id of ['task-status-header-pill', 'task-status-stage-pill']) {
+      const element = document.getElementById(id);
+      if (element) {
+        element.className = `task-status-pill is-${status}`;
+        element.textContent = statusLabels[status] || status;
+      }
+    }
+    for (const id of ['task-status-header-title', 'task-status-stage-title']) {
+      const element = document.getElementById(id);
+      if (element) element.textContent = title;
+    }
+    for (const id of ['task-status-header-message', 'task-status-stage-message']) {
+      const element = document.getElementById(id);
+      if (element) element.textContent = message;
+    }
+    for (const id of ['task-status-header-meta', 'task-status-stage-meta']) {
+      const element = document.getElementById(id);
+      if (element) element.textContent = meta;
+    }
+    for (const id of ['task-status-header-progress', 'task-status-stage-progress']) {
+      const element = document.getElementById(id);
+      if (element) element.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+    }
+  }
+
+  async function poll() {
+    if (!trackedProjectId) return;
+    try {
+      const response = await wrappedFetch(`/api/projects/${trackedProjectId}?task_poll=${Date.now()}`, { cache: 'no-store' });
+      if (!response.ok) return;
+      const project = await response.json();
+      renderTask(project.task_state);
+      const status = project.task_state?.status;
+      if (['review', 'approved', 'failed', 'timeout'].includes(status)) {
+        stopPolling();
+        if (typeof openProject === 'function') {
+          await openProject(trackedProjectId);
+        } else if (typeof reload === 'function') {
+          await reload();
+        }
+        if (['failed', 'timeout'].includes(status)) {
+          alert(`${project.task_state?.message || 'Генерация завершилась ошибкой.'}${project.task_state?.diagnostic ? `\nДиагностика: ${project.task_state.diagnostic}` : ''}`);
+        }
+      }
+    } catch (error) {
+      console.warn('Task polling failed', error);
+    }
+  }
+
+  function startPolling(projectId) {
+    trackedProjectId = projectId;
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, 3000);
+    poll();
+  }
+
+  function stopPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  window.fetch = async (...args) => {
+    const response = await wrappedFetch(...args);
+    const url = String(args[0]?.url || args[0] || '');
+    const generationMatch = url.match(/\/api\/projects\/([^/]+)\/(?:environment\/(?:generate|run)|ai\/environment)/);
+    const projectMatch = url.match(/\/api\/projects\/([^/?]+)(?:\?|$)/);
+
+    if (generationMatch && response.ok) {
+      const data = await response.clone().json().catch(() => null);
+      renderTask(data?.task_state || {
+        stage: 'environment',
+        status: 'running',
+        message: 'Задача поставлена в очередь.',
+        progress: 5,
+        started_at: new Date().toISOString()
+      });
+      startPolling(generationMatch[1]);
+    } else if (projectMatch && response.ok) {
+      const data = await response.clone().json().catch(() => null);
+      if (data?.task_state) {
+        trackedProjectId = projectMatch[1];
+        renderTask(data.task_state);
+        if (data.task_state.status === 'running') startPolling(projectMatch[1]);
+      }
+    }
+    return response;
+  };
+
+  setInterval(() => {
+    if (lastTask) renderTask(lastTask);
+  }, 1000);
+  ensureUi();
+  window.addEventListener('load', ensureUi);
+})();
+</script>
+
+
+<script>
+// v0.6.6 unified fields and labels
+(() => {
+  const reviewLabels = {
+    'geometry-comment': 'КОММЕНТАРИЙ К РЕЗУЛЬТАТУ ГЕОМЕТРИИ',
+    'environment-comment': 'КОММЕНТАРИЙ К РЕЗУЛЬТАТУ ОКРУЖЕНИЯ',
+    'branding-comment': 'КОММЕНТАРИЙ К РЕЗУЛЬТАТУ ВЫВЕСКИ'
+  };
+
+  function applyUnifiedFormStyles() {
+    Object.entries(reviewLabels).forEach(([id, labelText]) => {
+      const textarea = document.getElementById(id);
+      if (!textarea) return;
+      textarea.classList.add('fixed-comment-field');
+      textarea.setAttribute('rows', '4');
+      textarea.setAttribute('aria-label', labelText);
+      const reviewBox = textarea.closest('.review-box');
+      if (reviewBox && !reviewBox.querySelector('.review-box__label')) {
+        const label = document.createElement('span');
+        label.className = 'review-box__label';
+        label.textContent = labelText;
+        reviewBox.insertBefore(label, textarea);
+      }
+    });
+
+    ['environment-extra', 'branding-extra', 'branding-material'].forEach(id => {
+      const textarea = document.getElementById(id);
+      if (textarea) textarea.classList.add('fixed-operator-field');
+    });
+
+    ['environment-prompt', 'branding-prompt'].forEach(id => {
+      const textarea = document.getElementById(id);
+      if (textarea) textarea.classList.add('fixed-prompt-field');
+    });
+
+    ['geometry-skill'].forEach(id => {
+      const textarea = document.getElementById(id);
+      if (textarea) textarea.classList.add('fixed-skill-field');
+    });
+
+    document.querySelectorAll('.field-group').forEach(element => {
+      element.classList.add('unified-field-group');
+    });
+    document.querySelectorAll('.panel-kicker, .field-label').forEach(element => {
+      element.classList.add('unified-ui-label');
+    });
+  }
+
+  applyUnifiedFormStyles();
+  document.addEventListener('DOMContentLoaded', applyUnifiedFormStyles, { once: true });
+  const observer = new MutationObserver(applyUnifiedFormStyles);
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+})();
+</script>
+
+
+<script>
+// v0.6.8 runtime version display
+(() => {
+  const updateVersion = () => {
+    document.querySelectorAll('small, span, div').forEach(element => {
+      if ((element.textContent || '').trim() === 'V0.6.6') element.textContent = 'V0.6.8';
+      if ((element.textContent || '').trim() === '0.6.6') element.textContent = '0.6.7';
+    });
+  };
+  updateVersion();
+  document.addEventListener('DOMContentLoaded', updateVersion, { once: true });
+})();
+</script>
+
+<script>
+// v0.6.8 fullscreen review and automatic prompt refresh
+(() => {
+  const nativeFetch = window.fetch.bind(window);
+  let lastProjectId = null;
+
+  function projectIdFromUrl(value) {
+    const url = typeof value === 'string' ? value : (value?.url || '');
+    const match = url.match(/\/api\/projects\/([^/]+)/);
+    return match ? match[1] : null;
+  }
+
+  function ensurePromptFeedbackBadge() {
+    const prompt = document.getElementById('environment-prompt');
+    if (!prompt || document.getElementById('environment-feedback-badge')) return;
+    const badge = document.createElement('div');
+    badge.id = 'environment-feedback-badge';
+    badge.className = 'environment-feedback-badge';
+    badge.textContent = 'КОРРЕКТИРОВКИ В PROMPT: 0';
+    prompt.parentElement?.insertBefore(badge, prompt);
+  }
+
+  async function refreshEnvironmentPrompt(projectId) {
+    if (!projectId) return;
+    const endpoints = [
+      `/api/projects/${projectId}/environment/prompt`,
+      `/api/projects/${projectId}/prompt/environment`
+    ];
+    for (const endpoint of endpoints) {
+      try {
+        const response = await nativeFetch(endpoint, { cache: 'no-store' });
+        if (!response.ok) continue;
+        const data = await response.json();
+        const field = document.getElementById('environment-prompt');
+        if (field && data.prompt) field.value = data.prompt;
+        ensurePromptFeedbackBadge();
+        const badge = document.getElementById('environment-feedback-badge');
+        if (badge) {
+          const count = Number(data.pending_feedback_count || 0);
+          badge.textContent = `КОРРЕКТИРОВКИ В PROMPT: ${count}`;
+          badge.classList.toggle('has-feedback', count > 0);
+        }
+        return;
+      } catch (_) {}
+    }
+  }
+
+  window.fetch = async (...args) => {
+    const projectId = projectIdFromUrl(args[0]);
+    if (projectId) lastProjectId = projectId;
+    const response = await nativeFetch(...args);
+    const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
+    if (response.ok && /\/environment\/(revise|revision)$/.test(url)) {
+      setTimeout(() => refreshEnvironmentPrompt(projectId || lastProjectId), 120);
+    }
+    return response;
+  };
+
+  const modal = document.createElement('div');
+  modal.id = 'image-review-modal';
+  modal.className = 'image-review-modal hidden';
+  modal.innerHTML = `
+    <div class="image-review-modal__toolbar">
+      <div>
+        <span class="image-review-modal__kicker">FULLSCREEN REVIEW</span>
+        <strong id="image-review-modal-title">AI RESULT</strong>
+      </div>
+      <div class="image-review-modal__actions">
+        <button type="button" id="image-review-fit">ВПИСАТЬ</button>
+        <button type="button" id="image-review-actual">100%</button>
+        <button type="button" id="image-review-close">ЗАКРЫТЬ ×</button>
+      </div>
+    </div>
+    <div id="image-review-stage" class="image-review-modal__stage is-fit">
+      <img id="image-review-full" alt="Fullscreen AI result review">
+    </div>`;
+  document.body.appendChild(modal);
+
+  const stage = document.getElementById('image-review-stage');
+  const fullImage = document.getElementById('image-review-full');
+
+  function openReview(image, title) {
+    if (!image?.src) return;
+    fullImage.src = image.src;
+    document.getElementById('image-review-modal-title').textContent = title || 'AI RESULT';
+    stage.classList.add('is-fit');
+    stage.classList.remove('is-actual');
+    modal.classList.remove('hidden');
+    document.body.classList.add('image-review-open');
+  }
+
+  function closeReview() {
+    modal.classList.add('hidden');
+    document.body.classList.remove('image-review-open');
+    fullImage.removeAttribute('src');
+  }
+
+  document.getElementById('image-review-close').onclick = closeReview;
+  document.getElementById('image-review-fit').onclick = () => {
+    stage.classList.add('is-fit');
+    stage.classList.remove('is-actual');
+  };
+  document.getElementById('image-review-actual').onclick = () => {
+    stage.classList.remove('is-fit');
+    stage.classList.add('is-actual');
+  };
+  modal.addEventListener('click', event => {
+    if (event.target === modal) closeReview();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !modal.classList.contains('hidden')) closeReview();
+  });
+
+  function isAiResultImage(image) {
+    const src = image.getAttribute('src') || '';
+    const containerText = (image.closest('figure, .image-card, .compare-cell, div')?.textContent || '').toUpperCase();
+    return /environment|branding|ai[_-]?result/i.test(src) || containerText.includes('AI RESULT');
+  }
+
+  function bindReviewImages() {
+    document.querySelectorAll('#workspace img, main img').forEach(image => {
+      if (image.dataset.fullscreenReviewBound === '1' || !isAiResultImage(image)) return;
+      image.dataset.fullscreenReviewBound = '1';
+      image.classList.add('fullscreen-review-target');
+      image.title = 'Открыть результат на весь экран';
+      image.addEventListener('click', () => openReview(image, 'AI RESULT'));
+
+      const parent = image.parentElement;
+      if (parent && !parent.querySelector(':scope > .fullscreen-review-button')) {
+        parent.classList.add('fullscreen-review-host');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'fullscreen-review-button';
+        button.textContent = 'НА ВЕСЬ ЭКРАН';
+        button.onclick = event => {
+          event.preventDefault();
+          event.stopPropagation();
+          openReview(image, 'AI RESULT');
+        };
+        parent.appendChild(button);
+      }
+    });
+    ensurePromptFeedbackBadge();
+  }
+
+  bindReviewImages();
+  document.addEventListener('DOMContentLoaded', bindReviewImages, { once: true });
+  new MutationObserver(bindReviewImages).observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['src']
+  });
+})();
+</script>
+
+</body>
+</html>
