@@ -3,76 +3,169 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Brand Apply Studio</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <title>Brand Apply Studio — ручное нанесение бренда</title>
+  <link rel="stylesheet" href="./styles.css?v=0.3.0">
 </head>
 <body>
 <main>
   <header>
     <div>
-      <small>BRAND APPLY STUDIO</small>
-      <h1>Perspective Editor</h1>
+      <small>BRAND APPLY STUDIO · MVP 0.3</small>
+      <h1>Ручное нанесение бренда</h1>
+      <p>Исходник → сетка перспективы → брендинг → точное размещение → AI-постобработка.</p>
     </div>
-    <button id="newProject">Новый проект</button>
+    <div id="status" class="status">1. Загрузите исходник</div>
   </header>
 
-  <section class="top">
-    <select id="projects"></select>
-    <span id="status">Создайте или выберите проект.</span>
-  </section>
-
-  <section class="panel controls">
-    <div>
-      <label>1. Исходник</label>
-      <input id="sourceFile" type="file" accept="image/*">
-      <button id="uploadSource">Загрузить исходник</button>
-    </div>
-    <div>
-      <label>2. Брендинг</label>
-      <input id="designFile" type="file" accept=".png,.jpg,.jpeg,.webp,image/*">
-      <button id="uploadDesign">Загрузить дизайн</button>
-    </div>
-  </section>
-
-  <section class="panel">
-    <div class="section-heading">
+  <section class="steps">
+    <div class="step active" id="step1">
+      <b>01</b>
       <div>
-        <h2>3. Геометрия поверхности</h2>
-        <p>Перетащите P1–P4 на физические углы плоскости. Исходник не изменяется.</p>
-      </div>
-      <div class="actions">
-        <button class="ghost" id="resetGrid">Сбросить сетку</button>
-        <button id="saveSurface">Зафиксировать плоскость</button>
-        <button id="renderBrand">Построить брендирование</button>
+        <strong>Исходник</strong>
+        <label class="file-button">
+          Загрузить фото
+          <input id="sourceFile" type="file" accept="image/*">
+        </label>
       </div>
     </div>
 
-    <div id="canvasWrap">
-      <canvas id="perspectiveCanvas"></canvas>
-      <div class="hint">P1 верхний левый · P2 верхний правый · P3 нижний правый · P4 нижний левый</div>
+    <div class="step" id="step2">
+      <b>02</b>
+      <div>
+        <strong>Сетка</strong>
+        <span>Совместите P1–P4 с плоскостью.</span>
+        <div class="step-actions">
+          <button id="resetGrid" class="ghost" disabled>Сбросить</button>
+          <button id="lockGrid" disabled>Зафиксировать</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="step" id="step3">
+      <b>03</b>
+      <div>
+        <strong>Брендинг</strong>
+        <label class="file-button disabled" id="designLabel">
+          Загрузить PNG / WebP / JPG
+          <input id="designFile" type="file" accept="image/png,image/webp,image/jpeg" disabled>
+        </label>
+      </div>
+    </div>
+
+    <div class="step" id="step4">
+      <b>04</b>
+      <div>
+        <strong>Размещение</strong>
+        <span>Тяните логотип. Квадратный маркер меняет масштаб.</span>
+        <button id="resetBrand" class="ghost" disabled>По центру</button>
+      </div>
     </div>
   </section>
 
-  <section class="results">
-    <figure>
-      <figcaption>ИСХОДНИК</figcaption>
-      <img id="sourcePreview" alt="">
-    </figure>
-    <figure>
-      <figcaption>СЕТКА</figcaption>
-      <img id="guidePreview" alt="">
-    </figure>
-    <figure>
-      <figcaption>ТЕХНИЧЕСКОЕ НАНЕСЕНИЕ</figcaption>
-      <img id="brandPreview" alt="">
-    </figure>
-    <figure>
-      <figcaption>МАСКА</figcaption>
-      <img id="maskPreview" alt="">
-    </figure>
+  <section class="editor">
+    <div class="editor-head">
+      <div>
+        <strong id="editorTitle">Рабочая область</strong>
+        <span id="editorHint">После загрузки изображения здесь появится исходник.</span>
+      </div>
+      <div class="editor-actions">
+        <label class="grid-toggle">
+          <input id="showGrid" type="checkbox" checked disabled>
+          Сетка
+        </label>
+        <button id="fullscreenToggle" class="ghost" disabled>Во весь экран</button>
+      </div>
+    </div>
+
+    <div id="canvasWrap" class="canvas-wrap empty">
+      <canvas id="canvas"></canvas>
+      <div id="emptyState">
+        <strong>Загрузите фотографию изделия</strong>
+        <span>MASTER не изменяется. Сетка и брендинг строятся поверх него.</span>
+      </div>
+    </div>
+
+    <div class="export-bar">
+      <span>Экспорт</span>
+      <button id="exportComposite" class="ghost" disabled>Композит PNG</button>
+      <button id="exportLogoLayer" class="ghost" disabled>Слой логотипа PNG</button>
+      <button id="exportMask" class="ghost" disabled>Маска PNG</button>
+    </div>
+  </section>
+
+  <section class="ai-panel">
+    <div class="ai-heading">
+      <div>
+        <small>OPENROUTER · GPT IMAGE</small>
+        <h2>Дополнительная обработка</h2>
+        <p>AI получает MASTER, перспективный слой логотипа и маску. Геометрия и положение брендинга должны сохраняться.</p>
+      </div>
+      <span id="aiStatus" class="ai-status">Не готово</span>
+    </div>
+
+    <div class="ai-grid">
+      <label>
+        OpenRouter Gateway
+        <input id="gatewayUrl" type="url" placeholder="https://brand-apply-api.example.workers.dev">
+      </label>
+
+      <label>
+        Модель
+        <select id="aiModel">
+          <option value="openai/gpt-image-2">openai/gpt-image-2</option>
+          <option value="google/gemini-3.1-flash-image">google/gemini-3.1-flash-image</option>
+          <option value="sourceful/riverflow-v2.5-pro">sourceful/riverflow-v2.5-pro</option>
+        </select>
+      </label>
+
+      <label>
+        Материал
+        <select id="material">
+          <option value="paper">Бумага / картон</option>
+          <option value="plastic">Пластик</option>
+          <option value="fabric">Ткань</option>
+          <option value="metal">Металл</option>
+        </select>
+      </label>
+
+      <label>
+        Способ нанесения
+        <select id="applicationMode">
+          <option value="print">Печать</option>
+          <option value="foil">Фольга</option>
+          <option value="emboss">Тиснение</option>
+          <option value="deboss">Конгрев / углубление</option>
+        </select>
+      </label>
+
+      <label>
+        Качество
+        <select id="quality">
+          <option value="low">Тестовое</option>
+          <option value="medium" selected>Среднее</option>
+          <option value="high">Высокое</option>
+        </select>
+      </label>
+    </div>
+
+    <label class="prompt-label">
+      Дополнительная инструкция
+      <textarea id="aiPrompt" placeholder="Например: мягкая матовая печать, сохранить фактуру картона и естественные тени."></textarea>
+    </label>
+
+    <div class="ai-actions">
+      <button id="saveGateway" class="ghost">Сохранить Gateway</button>
+      <button id="processAI" disabled>Обработать через OpenRouter</button>
+      <button id="downloadAI" class="ghost" disabled>Скачать AI-результат</button>
+    </div>
+
+    <div class="ai-result-wrap">
+      <div id="aiPlaceholder">AI-результат появится здесь.</div>
+      <img id="aiResult" alt="AI result">
+    </div>
   </section>
 </main>
 
-<script src="/static/app.js"></script>
+<script src="./app.js?v=0.3.0"></script>
 </body>
 </html>
