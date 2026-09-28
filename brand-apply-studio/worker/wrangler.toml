@@ -1,0 +1,9 @@
+name = "brand-apply-openrouter"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+OPENROUTER_IMAGE_MODEL = "openai/gpt-image-2"
+OPENROUTER_HTTP_REFERER = "https://kontrakevich.github.io/MarinsFasad/brand-apply-studio/"
+OPENROUTER_APP_TITLE = "Brand Apply Studio"
+ALLOWED_ORIGINS = "https://kontrakevich.github.io"
