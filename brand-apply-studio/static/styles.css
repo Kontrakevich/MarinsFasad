@@ -1,0 +1,172 @@
+:root {
+  --navy: #052f48;
+  --teal: #008a90;
+  --paper: #f2f1ed;
+  --line: #bdc5ca;
+  --muted: #68757d;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--navy);
+  font-family: Arial, sans-serif;
+}
+
+main {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 28px;
+}
+
+header,
+.section-heading,
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+header {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--navy);
+}
+
+h1 {
+  margin: 5px 0 0;
+  font-size: 44px;
+}
+
+h2 { margin: 0 0 8px; }
+
+small,
+label,
+figcaption {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+
+p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.top {
+  margin: 18px 0;
+  justify-content: flex-start;
+}
+
+.panel {
+  margin: 16px 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.controls > div {
+  display: grid;
+  gap: 9px;
+}
+
+button,
+input,
+select {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  padding: 10px 14px;
+  font: inherit;
+}
+
+button {
+  border: 0;
+  background: var(--navy);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.ghost {
+  border: 1px solid var(--navy);
+  background: transparent;
+  color: var(--navy);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#canvasWrap {
+  position: relative;
+  width: 100%;
+  min-height: 380px;
+  margin-top: 18px;
+  overflow: hidden;
+  background: #17242c;
+  border: 1px solid var(--line);
+  text-align: center;
+}
+
+#perspectiveCanvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  touch-action: none;
+}
+
+.hint {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  padding: 9px 12px;
+  background: rgba(5,47,72,.88);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.results {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+figure {
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  background: #fff;
+}
+
+figure img {
+  display: block;
+  width: 100%;
+  min-height: 220px;
+  max-height: 620px;
+  margin-top: 10px;
+  object-fit: contain;
+  background: #e7e7e3;
+}
+
+@media (max-width: 900px) {
+  main { padding: 14px; }
+  h1 { font-size: 32px; }
+  header,
+  .section-heading { align-items: flex-start; flex-direction: column; }
+  .controls,
+  .results { grid-template-columns: 1fr; }
+}
