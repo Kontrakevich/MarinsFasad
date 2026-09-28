@@ -17,14 +17,38 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageDraw
 
 load_dotenv()
 ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "data" / "projects"
+DATA = Path(
+    os.getenv(
+        "MARINS_DATA_DIR",
+        str(ROOT / "data" / "projects"),
+    )
+).resolve()
 DATA.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Marins Fasad Control Center", version="1.0.0")
+
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "MARINS_CORS_ORIGINS",
+        "https://kontrakevich.github.io,http://127.0.0.1:8070,http://localhost:8070",
+    ).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
@@ -126,6 +150,18 @@ def copy_placeholder(src: Path, dst: Path, label: str) -> None:
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse((ROOT / "static" / "index.html").read_text("utf-8"))
+
+
+@app.get("/health")
+def health() -> dict:
+    return {
+        "status": "ok",
+        "service": "marins-fasad",
+        "data_root": str(DATA),
+        "openrouter_configured": bool(
+            os.getenv("OPENROUTER_API_KEY", "").strip()
+        ),
+    }
 
 
 @app.get("/api/projects")
