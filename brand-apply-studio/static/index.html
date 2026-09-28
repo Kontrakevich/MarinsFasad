@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Brand Apply Studio</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <small>BRAND APPLY STUDIO</small>
+      <h1>Perspective Editor</h1>
+    </div>
+    <button id="newProject">Новый проект</button>
+  </header>
+
+  <section class="top">
+    <select id="projects"></select>
+    <span id="status">Создайте или выберите проект.</span>
+  </section>
+
+  <section class="panel controls">
+    <div>
+      <label>1. Исходник</label>
+      <input id="sourceFile" type="file" accept="image/*">
+      <button id="uploadSource">Загрузить исходник</button>
+    </div>
+    <div>
+      <label>2. Брендинг</label>
+      <input id="designFile" type="file" accept=".png,.jpg,.jpeg,.webp,image/*">
+      <button id="uploadDesign">Загрузить дизайн</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-heading">
+      <div>
+        <h2>3. Геометрия поверхности</h2>
+        <p>Перетащите P1–P4 на физические углы плоскости. Исходник не изменяется.</p>
+      </div>
+      <div class="actions">
+        <button class="ghost" id="resetGrid">Сбросить сетку</button>
+        <button id="saveSurface">Зафиксировать плоскость</button>
+        <button id="renderBrand">Построить брендирование</button>
+      </div>
+    </div>
+
+    <div id="canvasWrap">
+      <canvas id="perspectiveCanvas"></canvas>
+      <div class="hint">P1 верхний левый · P2 верхний правый · P3 нижний правый · P4 нижний левый</div>
+    </div>
+  </section>
+
+  <section class="results">
+    <figure>
+      <figcaption>ИСХОДНИК</figcaption>
+      <img id="sourcePreview" alt="">
+    </figure>
+    <figure>
+      <figcaption>СЕТКА</figcaption>
+      <img id="guidePreview" alt="">
+    </figure>
+    <figure>
+      <figcaption>ТЕХНИЧЕСКОЕ НАНЕСЕНИЕ</figcaption>
+      <img id="brandPreview" alt="">
+    </figure>
+    <figure>
+      <figcaption>МАСКА</figcaption>
+      <img id="maskPreview" alt="">
+    </figure>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
