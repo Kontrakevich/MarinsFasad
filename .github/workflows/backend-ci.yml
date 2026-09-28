@@ -1,0 +1,33 @@
+name: Backend CI
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "app/**"
+      - "requirements.txt"
+      - "Dockerfile"
+      - "railway.toml"
+      - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile backend
+        run: python -m compileall app
+
+      - name: Build Docker image
+        run: docker build -t marins-fasad-backend:ci .
