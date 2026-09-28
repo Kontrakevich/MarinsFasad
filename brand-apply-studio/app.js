@@ -112,9 +112,29 @@ function applyH(H,x,y){
   return {x:(H[0][0]*x+H[0][1]*y+H[0][2])/z,y:(H[1][0]*x+H[1][1]*y+H[1][2])/z};
 }
 
+function surfaceAspect(){
+  const [tl,tr,br,bl]=state.corners;
+  const top=Math.hypot(tr.x-tl.x,tr.y-tl.y);
+  const bottom=Math.hypot(br.x-bl.x,br.y-bl.y);
+  const left=Math.hypot(bl.x-tl.x,bl.y-tl.y);
+  const right=Math.hypot(br.x-tr.x,br.y-tr.y);
+  return Math.max(1e-6,(top+bottom)/(left+right));
+}
+
 function designTargetQuad(){
-  const s=state.scale,margin=(1-s)/2;
-  return [bilinear(margin,margin),bilinear(1-margin,margin),bilinear(1-margin,1-margin),bilinear(margin,1-margin)];
+  const s=state.scale;
+  const designAspect=state.design ? state.design.width/state.design.height : 1;
+  const planeAspect=surfaceAspect();
+  const ratio=designAspect/planeAspect;
+
+  let uSize=s,vSize=s;
+  if(ratio>=1){uSize=s;vSize=s/ratio}
+  else{uSize=s*ratio;vSize=s}
+
+  const u0=.5-uSize/2,u1=.5+uSize/2;
+  const v0=.5-vSize/2,v1=.5+vSize/2;
+
+  return [bilinear(u0,v0),bilinear(u1,v0),bilinear(u1,v1),bilinear(u0,v1)];
 }
 
 function renderBrandTo(target,maskOnly=false){
