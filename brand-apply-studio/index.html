@@ -3,96 +3,87 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Brand Apply Studio — Perspective Lock</title>
-  <link rel="stylesheet" href="./styles.css?v=0.1.0">
+  <title>Brand Apply Studio — ручное нанесение бренда</title>
+  <link rel="stylesheet" href="./styles.css?v=0.2.0">
 </head>
 <body>
 <main>
   <header>
     <div>
-      <small>BRAND APPLY STUDIO · MVP 0.1</small>
-      <h1>Perspective Lock</h1>
-      <p>Ручная геометрия поверхности → точная проекция брендинга → технический референс для генератора.</p>
+      <small>BRAND APPLY STUDIO · MVP 0.2</small>
+      <h1>Ручное нанесение бренда</h1>
+      <p>Исходник → сетка перспективы → файл брендинга → перемещение и масштабирование.</p>
     </div>
-    <div id="status" class="status">Ожидание исходника</div>
+    <div id="status" class="status">1. Загрузите исходник</div>
   </header>
 
-  <section class="toolbar">
-    <label class="upload">
-      <span>1. Исходник изделия</span>
-      <input id="sourceFile" type="file" accept="image/*">
-    </label>
-    <label class="upload">
-      <span>2. Логотип / дизайн</span>
-      <input id="designFile" type="file" accept="image/png,image/webp,image/jpeg">
-    </label>
-    <button id="resetGrid" class="ghost">Сбросить сетку</button>
-    <button id="exportGuide">Скачать сетку</button>
-    <button id="exportComposite">Скачать тех. нанесение</button>
-  </section>
-
-  <section class="workspace">
-    <aside>
-      <h2>Плоскость</h2>
-      <p class="muted">Перетащите P1–P4 на реальные углы поверхности.</p>
-
-      <div class="point-list">
-        <div><b>P1</b><span>верхний левый</span></div>
-        <div><b>P2</b><span>верхний правый</span></div>
-        <div><b>P3</b><span>нижний правый</span></div>
-        <div><b>P4</b><span>нижний левый</span></div>
+  <section class="steps">
+    <div class="step active" id="step1">
+      <b>01</b>
+      <div>
+        <strong>Исходник</strong>
+        <label class="file-button">
+          Загрузить фото
+          <input id="sourceFile" type="file" accept="image/*">
+        </label>
       </div>
+    </div>
 
-      <h2>Брендинг</h2>
-      <label>Масштаб внутри поверхности
-        <input id="brandScale" type="range" min="10" max="100" value="55">
-      </label>
-      <label>Прозрачность
-        <input id="brandOpacity" type="range" min="10" max="100" value="100">
-      </label>
-
-      <div class="metric">
-        <span>Сетка</span><strong>8 × 6</strong>
-      </div>
-      <div class="metric">
-        <span>Источник</span><strong id="sourceSize">—</strong>
-      </div>
-      <div class="metric">
-        <span>Погрешность геометрии</span><strong>детерминированная</strong>
-      </div>
-
-      <pre id="sceneJson">{}</pre>
-    </aside>
-
-    <article>
-      <div id="canvasWrap" class="canvas-wrap">
-        <div id="stage" class="stage">
-          <canvas id="canvas"></canvas>
+    <div class="step" id="step2">
+      <b>02</b>
+      <div>
+        <strong>Сетка</strong>
+        <span>Совместите P1–P4 с плоскостью</span>
+        <div class="step-actions">
+          <button id="resetGrid" class="ghost" disabled>Сбросить</button>
+          <button id="lockGrid" disabled>Зафиксировать сетку</button>
         </div>
-        <div class="hint">MASTER не изменяется. Сетка и бренд строятся поверх одного изображения.</div>
       </div>
-    </article>
+    </div>
+
+    <div class="step" id="step3">
+      <b>03</b>
+      <div>
+        <strong>Брендинг</strong>
+        <label class="file-button disabled" id="designLabel">
+          Загрузить PNG / WebP / JPG
+          <input id="designFile" type="file" accept="image/png,image/webp,image/jpeg" disabled>
+        </label>
+      </div>
+    </div>
+
+    <div class="step" id="step4">
+      <b>04</b>
+      <div>
+        <strong>Размещение</strong>
+        <span>Тяните логотип для перемещения. Квадратный маркер — масштаб.</span>
+        <button id="resetBrand" class="ghost" disabled>Вернуть по центру</button>
+      </div>
+    </div>
   </section>
 
-  <section class="outputs">
-    <figure>
-      <figcaption>MASTER</figcaption>
-      <canvas id="masterPreview"></canvas>
-    </figure>
-    <figure>
-      <figcaption>GUIDE</figcaption>
-      <canvas id="guidePreview"></canvas>
-    </figure>
-    <figure>
-      <figcaption>BRAND PREVIEW</figcaption>
-      <canvas id="brandPreview"></canvas>
-    </figure>
-    <figure>
-      <figcaption>DESIGN MASK</figcaption>
-      <canvas id="maskPreview"></canvas>
-    </figure>
+  <section class="editor">
+    <div class="editor-head">
+      <div>
+        <strong id="editorTitle">Рабочая область</strong>
+        <span id="editorHint">После загрузки изображения здесь появится исходник.</span>
+      </div>
+      <label class="grid-toggle">
+        <input id="showGrid" type="checkbox" checked disabled>
+        Показывать сетку
+      </label>
+    </div>
+
+    <div id="canvasWrap" class="canvas-wrap empty">
+      <canvas id="canvas"></canvas>
+      <div id="emptyState">
+        <strong>Загрузите фотографию изделия</strong>
+        <span>Изображение остается неизменным. Все элементы строятся поверх него.</span>
+      </div>
+    </div>
   </section>
 </main>
-<script src="./app.js?v=0.1.0"></script>
+
+<script src="./app.js?v=0.2.0"></script>
 </body>
 </html>
