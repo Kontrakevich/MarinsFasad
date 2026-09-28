@@ -1,0 +1,10 @@
+.git
+.github
+.devcontainer
+.runtime
+__pycache__
+*.pyc
+*.pyo
+.env
+data
+release
